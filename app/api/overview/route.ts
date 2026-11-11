@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getStore } from "@/lib/store";
 import { getConfig, DEMO_PROJECT, type ProjectEntry } from "@/lib/config";
-import { queryEvents, type EventRow } from "@/lib/bd";
+import { createBdStore, queryEvents, type EventRow } from "@/lib/bd";
+import type { BeadsStore } from "@/lib/store";
 import { ok, fail } from "@/lib/api";
 import {
   buildOverview,
@@ -22,11 +22,27 @@ type Part = { project: ProjectOverview; activity: ActivityItem[] };
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/**
+ * The overview's own read-only stores, one per repo path. Deliberately not
+ * `getStore`: that records the project as opened, which rewrites Scotty's
+ * config file, and this page must not write anything. bd calls still
+ * serialize per repo inside lib/bd.ts, so these cannot collide with the
+ * project views' stores.
+ */
+const stores = new Map<string, BeadsStore>();
+function overviewStore(repoPath: string): BeadsStore {
+  let store = stores.get(repoPath);
+  if (!store) {
+    store = createBdStore(repoPath);
+    stores.set(repoPath, store);
+  }
+  return store;
+}
+
 /** Both reads for one project. A failed events query degrades to "activity unavailable". */
 async function readProject(project: ProjectEntry, cutoff: string): Promise<Part> {
-  const store = await getStore(project.id);
   const [beads, events] = await Promise.all([
-    store.list(),
+    overviewStore(project.path).list(),
     queryEvents(project.path, cutoff).catch((): EventRow[] | null => null),
   ]);
   return {
