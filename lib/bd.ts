@@ -110,6 +110,43 @@ function serializeWrite<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/** One row of bd's audit `events` table, joined to the issue title (overview feed). */
+export interface EventRow {
+  created_at: string;
+  issue_id: string;
+  title: string | null;
+  event_type: string;
+  actor: string;
+  new_value: string | null;
+  /** bd puts the label name here for label events ("Added label: x"). */
+  comment: string | null;
+}
+
+const CUTOFF_RE = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
+const inflightEvents = new Map<string, Promise<EventRow[]>>();
+
+/**
+ * Audit events since `cutoff`, newest first, max 200. Read-only SQL against
+ * bd's internal schema (pinned bd), so callers must degrade when it throws.
+ * `cutoff` is the only interpolated value and must be a second-precision UTC
+ * ISO timestamp. Concurrent callers for one repo share a single query.
+ */
+export function queryEvents(repoPath: string, cutoff: string): Promise<EventRow[]> {
+  if (!CUTOFF_RE.test(cutoff)) return Promise.reject(new BdError(`invalid cutoff: ${cutoff}`));
+  const hit = inflightEvents.get(repoPath);
+  if (hit) return hit;
+  const sql =
+    "select e.created_at, e.issue_id, i.title, e.event_type, e.actor, e.new_value, e.comment " +
+    "from events e left join issues i on i.id = e.issue_id " +
+    `where e.created_at >= '${cutoff}' order by e.created_at desc limit 200`;
+  const run = serializeWrite(repoPath, async () => {
+    const data = await runBdJson<EventRow[] | null>(["--readonly", "sql", sql], { repoPath });
+    return Array.isArray(data) ? data : [];
+  }).finally(() => inflightEvents.delete(repoPath));
+  inflightEvents.set(repoPath, run);
+  return run;
+}
+
 const availabilityCache = new Map<string, boolean>();
 
 export async function isBdAvailable(repoPath: string): Promise<boolean> {
