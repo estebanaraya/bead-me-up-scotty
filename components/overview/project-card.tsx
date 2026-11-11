@@ -112,10 +112,7 @@ export function ProjectCard({ project }: { project: ProjectOverview }) {
   if (project.state === "not-on-beads") {
     return (
       <div className="px-[14px] py-[6px] text-[12.5px] text-[var(--text-3)]">
-        <Link href={projectHref(project.id)} className="font-medium hover:text-[var(--text-2)]">
-          {project.name}
-        </Link>{" "}
-        · not on Beads
+        <span className="font-medium">{project.name}</span> · not on Beads
       </div>
     );
   }
@@ -152,6 +149,8 @@ export function ProjectCard({ project }: { project: ProjectOverview }) {
                   {" "}
                   · last activity {relTime(project.lastActivity)}
                 </span>
+              ) : project.activityState === "unavailable" ? (
+                " · activity unavailable"
               ) : (
                 " · no activity in the last 24 hours"
               )}
