@@ -26,7 +26,7 @@ function LeadLink({ lead }: { lead: LeadRef }) {
         <span className="h-[5px] w-[5px] flex-shrink-0 rounded-full bg-[var(--brand)]" />
         <span className="truncate">{label}</span>
       </TooltipTrigger>
-      <TooltipContent className="font-mono">{lead.id}</TooltipContent>
+      <TooltipContent className="max-w-none whitespace-nowrap font-mono">{lead.id}</TooltipContent>
     </Tooltip>
   );
 }

@@ -135,16 +135,16 @@ export function OverviewView() {
           </Button>
         </div>
       ) : (
-        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:overflow-hidden">
+        <main className="bd-scroll flex min-h-0 flex-1 flex-col overflow-y-auto lg:overflow-hidden">
           <div className="px-[16px] pt-[16px] sm:px-[28px] sm:pt-[20px]">
             <TotalsStrip totals={data?.totals ?? null} />
           </div>
-          <div className="grid gap-x-[24px] gap-y-[24px] px-[16px] pt-[20px] sm:px-[28px] lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-x-[24px] gap-y-[24px] px-[16px] pt-[20px] sm:px-[28px] lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
             {isPending || !data ? (
               <LoadingColumns />
             ) : (
               <>
-                <section aria-label="Projects" className="pb-[24px] lg:min-h-0 lg:overflow-y-auto lg:pr-[4px]">
+                <section aria-label="Projects" className="bd-scroll pb-[24px] lg:min-h-0 lg:overflow-y-auto lg:pr-[6px]">
                   <ColumnHeading>Projects</ColumnHeading>
                   {data.projects.length === 0 ? (
                     <p className="text-[13px] text-[var(--text-3)]">
@@ -162,7 +162,7 @@ export function OverviewView() {
                     </div>
                   )}
                 </section>
-                <section aria-label="Activity" className="pb-[24px] lg:min-h-0 lg:overflow-y-auto lg:pr-[4px]">
+                <section aria-label="Activity" className="bd-scroll pb-[24px] lg:min-h-0 lg:overflow-y-auto lg:pr-[6px]">
                   <ColumnHeading>Activity, last 24 hours</ColumnHeading>
                   <ActivityFeed items={data.activity} projects={data.projects} />
                 </section>
