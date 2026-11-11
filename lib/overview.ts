@@ -77,12 +77,16 @@ function firstLine(text: string): string | null {
   return clip(text.trim().split(/\r?\n/)[0] ?? "");
 }
 
-/** First line of the last non-empty paragraph of a notes field, cut to 140 characters. */
+/**
+ * The newest note: the last non-empty line of a notes field, cut to 140
+ * characters. `bd note` appends each entry on its own line, so the last line
+ * is the latest one.
+ */
 export function latestNote(notes: string | null | undefined): string | null {
   if (!notes) return null;
-  const paragraphs = notes.split(/\r?\n\s*\r?\n/).filter((p) => p.trim() !== "");
-  const last = paragraphs[paragraphs.length - 1];
-  return last ? firstLine(last) : null;
+  const lines = notes.split(/\r?\n/).filter((line) => line.trim() !== "");
+  const last = lines[lines.length - 1];
+  return last ? clip(last) : null;
 }
 
 /** The lead session recorded on an issue; null unless metadata `lead` is a non-empty string. */
@@ -249,15 +253,19 @@ export function buildProject(
 }
 
 function hasWork(p: ProjectOverview): boolean {
-  return p.inFlight.length > 0 || p.blocked.length > 0;
+  return p.inFlight.length > 0 || p.blocked.length > 0 || p.needsYou.length > 0;
 }
 
-/** Projects with in-flight or blocked work first, then newest activity, then name. */
+/**
+ * Stable order, so cards do not move while agents write: projects with
+ * in-flight, blocked or needs-you work first, then idle ones, each group by
+ * name, case-insensitive.
+ */
 export function compareProjects(a: ProjectOverview, b: ProjectOverview): number {
   return (
     Number(hasWork(b)) - Number(hasWork(a)) ||
-    ms(b.lastActivity) - ms(a.lastActivity) ||
-    a.name.localeCompare(b.name)
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
+    a.id.localeCompare(b.id)
   );
 }
 

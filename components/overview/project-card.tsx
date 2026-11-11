@@ -1,9 +1,13 @@
 "use client";
+import * as React from "react";
 import Link from "next/link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { catColor, fmtDateTime, relTime, statusLabel } from "@/lib/beads-view";
 import type { IssueRow, LeadRef, ProjectOverview } from "@/lib/overview";
 import { cn } from "@/lib/utils";
+
+/** Rows a group shows before its "Show all" toggle. */
+const GROUP_PREVIEW = 5;
 
 const enc = encodeURIComponent;
 export const projectHref = (projectId: string) => `/p/${enc(projectId)}?view=focus`;
@@ -92,17 +96,31 @@ function IssueGroup({
   projectId: string;
   rows: IssueRow[];
 }) {
+  // View state only: which groups are expanded resets on reload.
+  const [expanded, setExpanded] = React.useState(false);
   if (rows.length === 0) return null;
+  // Rows arrive newest first, so the collapsed group is its most recent few.
+  const shown = expanded ? rows : rows.slice(0, GROUP_PREVIEW);
   return (
     <section className="mt-[10px] first:mt-0">
       <h3 className="px-[10px] pb-[2px] text-[10.5px] font-[650] uppercase tracking-[.04em] text-[var(--text-3)]">
         {label} <span className="tabular-nums">{rows.length}</span>
       </h3>
       <ul>
-        {rows.map((row) => (
+        {shown.map((row) => (
           <IssueLine key={row.id} projectId={projectId} row={row} />
         ))}
       </ul>
+      {rows.length > GROUP_PREVIEW && (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((open) => !open)}
+          className="ml-[10px] mt-[2px] rounded-[6px] py-[3px] text-[12px] font-medium text-[var(--brand)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
+        >
+          {expanded ? `Show ${GROUP_PREVIEW} most recent` : `Show all ${rows.length}`}
+        </button>
+      )}
     </section>
   );
 }
