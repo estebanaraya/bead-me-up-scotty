@@ -118,6 +118,8 @@ export interface EventRow {
   event_type: string;
   actor: string;
   new_value: string | null;
+  /** bd puts the label name here for label events ("Added label: x"). */
+  comment: string | null;
 }
 
 const CUTOFF_RE = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
@@ -134,7 +136,7 @@ export function queryEvents(repoPath: string, cutoff: string): Promise<EventRow[
   const hit = inflightEvents.get(repoPath);
   if (hit) return hit;
   const sql =
-    "select e.created_at, e.issue_id, i.title, e.event_type, e.actor, e.new_value " +
+    "select e.created_at, e.issue_id, i.title, e.event_type, e.actor, e.new_value, e.comment " +
     "from events e left join issues i on i.id = e.issue_id " +
     `where e.created_at >= '${cutoff}' order by e.created_at desc limit 200`;
   const run = serializeWrite(repoPath, async () => {
