@@ -134,6 +134,8 @@ export const beadSchema = z
      * waiting on a person (bead 8qc / gh-6).
      */
     await_type: z.string().optional(),
+    /** Free-form issue metadata (`bd update --metadata`); the overview reads `agent`, `lead`, `lead_title`. */
+    metadata: z.record(z.string(), z.unknown()).optional(),
   });
 export type Bead = z.infer<typeof beadSchema>;
 
