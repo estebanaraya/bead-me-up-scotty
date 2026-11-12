@@ -127,3 +127,36 @@ test("an unknown pace still knows whether the project has recorded work", () => 
   assert.deepEqual([asked.pace, hasRecordedWork(asked)], ["unknown", true]);
   assert.equal(hasRecordedWork(buildTile(P, [], {}, NOW)), false);
 });
+
+test("answered asks split out, with the human actor's newest comment as the answer", () => {
+  const beads = [
+    bead({
+      id: "d1", issue_type: "decision", labels: ["answered"], updated_at: iso(9 * HOUR),
+      comments: [
+        { author: "estebanaraya", text: "Old answer", created_at: iso(5 * HOUR) },
+        { author: "lead-bot", text: "Noted", created_at: iso(4 * HOUR) },
+        { author: "estebanaraya", text: "  Steam first.  ", created_at: iso(2 * HOUR) },
+      ],
+    } as Partial<Bead> & { id: string }),
+    bead({ id: "d2", issue_type: "decision", labels: ["answered"], updated_at: iso(1 * HOUR) }),
+    bead({ id: "d3", issue_type: "decision" }),
+  ];
+  const t = buildTile(P, beads, {}, NOW, "estebanaraya");
+  assert.deepEqual(t.asksOpen.map((a) => a.id), ["d3"]);
+  assert.deepEqual(t.asksAnswered.map((a) => [a.id, a.answer, a.answeredAt]), [
+    ["d2", null, iso(1 * HOUR)],
+    ["d1", "Steam first.", iso(2 * HOUR)],
+  ]);
+});
+
+test("top ask never points at an answered ask", () => {
+  const beads = [
+    bead({ id: "pick", issue_type: "decision", labels: ["answered"], priority: 0, created_at: iso(30 * HOUR) }),
+    bead({ id: "p1", issue_type: "decision", priority: 1, created_at: iso(10 * HOUR) }),
+  ];
+  const lead = buildTile(P, beads, { "status.ask_id": "pick", "status.ask": "Pick" }, NOW, "estebanaraya");
+  assert.deepEqual([lead.topAsk?.id, lead.topAsk?.source], ["p1", "priority"]);
+  const onlyAnswered = buildTile(P, [beads[0]], {}, NOW, "estebanaraya");
+  assert.equal(onlyAnswered.topAsk, null);
+  assert.equal(onlyAnswered.asksAnswered.length, 1);
+});

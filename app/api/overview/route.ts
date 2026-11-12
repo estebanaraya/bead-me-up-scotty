@@ -33,7 +33,7 @@ async function readProject(project: ProjectEntry, now: Date): Promise<Tile> {
     homeStore(project.path).list(),
     readKv(project.path).catch((): Kv => ({})),
   ]);
-  return buildTile(project, beads, kv, now);
+  return buildTile(project, beads, kv, now, getConfig().humanActor);
 }
 
 /** One project, never throwing: no `.beads` folder, a thrown read and a stall each become a state. */

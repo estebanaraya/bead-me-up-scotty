@@ -30,6 +30,7 @@ export type Ask = {
   createdAt: string | null;
 };
 export type TopAsk = Ask & { text: string; source: "lead" | "priority" };
+export type AnsweredAsk = Ask & { answeredAt: string | null; answer: string | null };
 export type Status = { moved: string | null; next: string | null; at: string | null; stale: boolean };
 export type Tile = {
   id: string;
@@ -44,6 +45,7 @@ export type Tile = {
   lastClosed: { id: string; title: string; closedAt: string } | null;
   asksOpen: Ask[];
   asksWaiting: Ask[];
+  asksAnswered: AnsweredAsk[];
   topAsk: TopAsk | null;
   lead: LeadRef | null;
 };
@@ -85,6 +87,29 @@ function toAsk(project: ProjectRef, b: Bead): Ask {
   return { projectId: project.id, projectName: project.name, id: b.id, title: b.title, kind, createdAt: b.created_at ?? null };
 }
 
+/** An ask Esteban has answered: it stays open until the lead acts, labelled `answered`. */
+export function isAnswered(b: Bead): boolean {
+  return (b.labels ?? []).includes("answered");
+}
+
+/** Esteban's newest answer on an issue: the latest comment he authored, else none. */
+function toAnswered(project: ProjectRef, b: Bead, humanActor: string | undefined): AnsweredAsk {
+  const mine = humanActor
+    ? (b.comments ?? []).filter((c) => c.author === humanActor && (c.text ?? "").trim() !== "")
+    : [];
+  const latest = mine.reduce<(typeof mine)[number] | null>(
+    (best, c) => (best === null || (ms(c.created_at) ?? 0) >= (ms(best.created_at) ?? 0) ? c : best),
+    null,
+  );
+  return {
+    ...toAsk(project, b),
+    answeredAt: latest?.created_at ?? b.updated_at ?? null,
+    answer: latest ? clip(latest.text.trim()) : null,
+  };
+}
+
+const byNewestAnswer = (a: AnsweredAsk, b: AnsweredAsk) => (ms(b.answeredAt) ?? 0) - (ms(a.answeredAt) ?? 0);
+
 const byOldest = (a: { createdAt: string | null }, b: { createdAt: string | null }) =>
   (ms(a.createdAt) ?? Infinity) - (ms(b.createdAt) ?? Infinity);
 
@@ -99,7 +124,7 @@ export function readStatus(kv: Kv, lastMoved: string | null): Status {
 function topAsk(project: ProjectRef, kv: Kv, index: Map<string, Bead>, open: Bead[]): TopAsk | null {
   const pickedId = str(kv["status.ask_id"]);
   const picked = pickedId ? index.get(pickedId) : undefined;
-  if (picked && isAsk(picked)) {
+  if (picked && isAsk(picked) && !isAnswered(picked)) {
     const ask = toAsk(project, picked);
     return { ...ask, text: clip(str(kv["status.ask"])) ?? ask.title, source: "lead" };
   }
@@ -118,14 +143,16 @@ function tileLead(beads: Bead[]): LeadRef | null {
   return best?.lead ?? null;
 }
 
-export function buildTile(project: ProjectRef, beads: Bead[], kv: Kv, now: Date): Tile {
+export function buildTile(project: ProjectRef, beads: Bead[], kv: Kv, now: Date, humanActor?: string): Tile {
   const index = makeIndex(beads);
   const bulk = bulkMinutes(beads);
   const statusAt = readStatus(kv, null).at;
   const moved = lastMovedAt(beads, bulk, statusAt);
   const asks = beads.filter(isAsk);
-  const open = asks.filter((b) => !isBlocked(b, index));
-  const waiting = asks.filter((b) => isBlocked(b, index));
+  const answered = asks.filter(isAnswered);
+  const pending = asks.filter((b) => !isAnswered(b));
+  const open = pending.filter((b) => !isBlocked(b, index));
+  const waiting = pending.filter((b) => isBlocked(b, index));
   return {
     id: project.id,
     name: project.name,
@@ -138,6 +165,7 @@ export function buildTile(project: ProjectRef, beads: Bead[], kv: Kv, now: Date)
     lastClosed: lastClosed(beads, bulk),
     asksOpen: open.map((b) => toAsk(project, b)).sort(byOldest),
     asksWaiting: waiting.map((b) => toAsk(project, b)).sort(byOldest),
+    asksAnswered: answered.map((b) => toAnswered(project, b, humanActor)).sort(byNewestAnswer),
     topAsk: topAsk(project, kv, index, open),
     lead: tileLead(beads),
   };
@@ -151,7 +179,7 @@ export function buildTile(project: ProjectRef, beads: Bead[], kv: Kv, now: Date)
 export function hasRecordedWork(tile: Tile): boolean {
   return (
     tile.phases.some((p) => p.total > 0) ||
-    tile.asksOpen.length + tile.asksWaiting.length > 0 ||
+    tile.asksOpen.length + tile.asksWaiting.length + tile.asksAnswered.length > 0 ||
     tile.lastClosed !== null
   );
 }
@@ -171,6 +199,7 @@ export function emptyTile(project: ProjectRef, state: "not-on-beads" | "error", 
     lastClosed: null,
     asksOpen: [],
     asksWaiting: [],
+    asksAnswered: [],
     topAsk: null,
     lead: null,
   };
