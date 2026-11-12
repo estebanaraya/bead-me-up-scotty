@@ -1,6 +1,9 @@
+"use client";
+import * as React from "react";
 import Link from "next/link";
 import { relTime } from "@/lib/beads-view";
 import type { TopAsk } from "@/lib/overview";
+import { AnswerRow } from "@/components/home/ask-list";
 import { FOCUS_RING, askHref } from "@/components/home/tile-parts";
 
 /** "asked 3d ago" reads as "waiting 3d"; a brand-new ask reads as "new". */
@@ -9,11 +12,15 @@ function waited(createdAt: string): string {
   return rel === "just now" ? "new" : `waiting ${rel.replace(/ ago$/, "")}`;
 }
 
+const key = (a: TopAsk) => `${a.projectId}:${a.id}`;
+
 /**
- * At most one line per project: the ask its lead says is holding it up.
- * Wide: project, ask, wait on one line. Narrow: project and wait above the ask.
+ * At most one line per project: the ask its lead says is holding it up, with its Answer
+ * button beside the link. Wide: project, ask, wait on one line. Narrow: project and wait
+ * above the ask. One answer box open at a time, full width under its line.
  */
-export function NeedsNow({ asks }: { asks: TopAsk[] }) {
+export function NeedsNow({ asks, canAnswer }: { asks: TopAsk[]; canAnswer: boolean }) {
+  const [openKey, setOpenKey] = React.useState<string | null>(null);
   return (
     <section
       aria-labelledby="needs-now"
@@ -30,7 +37,16 @@ export function NeedsNow({ asks }: { asks: TopAsk[] }) {
       ) : (
         <ul className="-mx-[6px] mt-[8px] flex flex-col gap-[2px]">
           {asks.map((a) => (
-            <li key={`${a.projectId}:${a.id}`}>
+            <AnswerRow
+              key={key(a)}
+              projectId={a.projectId}
+              issueId={a.id}
+              label={a.text}
+              canAnswer={canAnswer}
+              open={openKey === key(a)}
+              onOpen={() => setOpenKey(key(a))}
+              onClose={() => setOpenKey(null)}
+            >
               <Link
                 href={askHref(a.projectId, a.id)}
                 className={`grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-[12px] gap-y-[2px] rounded-[8px] px-[6px] py-[5px] hover:bg-[var(--surface-2)] sm:grid-cols-[minmax(0,160px)_minmax(0,1fr)_auto] ${FOCUS_RING}`}
@@ -47,7 +63,7 @@ export function NeedsNow({ asks }: { asks: TopAsk[] }) {
                   </span>
                 )}
               </Link>
-            </li>
+            </AnswerRow>
           ))}
         </ul>
       )}

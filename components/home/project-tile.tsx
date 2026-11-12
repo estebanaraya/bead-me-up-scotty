@@ -2,15 +2,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
+import { AnsweredList, AskList } from "@/components/home/ask-list";
 import { PhaseMeter } from "@/components/home/phase-meter";
-import {
-  AskList,
-  FOCUS_RING,
-  LeadLink,
-  PaceLine,
-  StatusBlock,
-  boardHref,
-} from "@/components/home/tile-parts";
+import { FOCUS_RING, LeadLink, PaceLine, StatusBlock, boardHref } from "@/components/home/tile-parts";
+import { catColor } from "@/lib/beads-view";
 import type { Tile } from "@/lib/overview";
 import { cn } from "@/lib/utils";
 
@@ -34,13 +29,35 @@ function TileLink({ href, children }: { href: string; children: React.ReactNode 
   );
 }
 
-/** "2 questions open, 1 waiting"; a zero clause is dropped, and both zero says nothing. */
-function questionsLine(open: number, waiting: number): string | null {
-  const parts = [
-    open > 0 ? `${open} ${open === 1 ? "question" : "questions"} open` : null,
-    waiting > 0 ? `${waiting} waiting` : null,
-  ].filter(Boolean);
-  return parts.length ? parts.join(", ") : null;
+type Clause = { key: string; text: string; color?: string };
+
+/**
+ * "2 questions open · 1 answered · 1 waiting", the answered clause in Scotty's green; a zero
+ * clause is dropped, and all zero says nothing.
+ */
+function QuestionsLine({ open, answered, waiting }: { open: number; answered: number; waiting: number }) {
+  const clauses: Clause[] = [];
+  if (open > 0) clauses.push({ key: "open", text: `${open} ${open === 1 ? "question" : "questions"} open` });
+  if (answered > 0) clauses.push({ key: "answered", text: `${answered} answered`, color: catColor("closed") });
+  if (waiting > 0) clauses.push({ key: "waiting", text: `${waiting} waiting` });
+  if (clauses.length === 0) return null;
+  return (
+    <span className="tabular-nums">
+      {clauses.map((c, i) => (
+        <React.Fragment key={c.key}>
+          {i > 0 && (
+            <>
+              <span aria-hidden> · </span>
+              <span className="sr-only">, </span>
+            </>
+          )}
+          <span className={cn(c.color && "font-[600]")} style={c.color ? { color: c.color } : undefined}>
+            {c.text}
+          </span>
+        </React.Fragment>
+      ))}
+    </span>
+  );
 }
 
 /** A region that grows from zero height; the negative top margin cancels its column gap while closed. */
@@ -65,7 +82,7 @@ function Reveal({ id, open, className, children }: { id: string; open: boolean; 
  * stretched name link as their own controls; nothing interactive is nested in
  * another control. Details grows the tile downward in place.
  */
-export function ProjectTile({ tile }: { tile: Tile }) {
+export function ProjectTile({ tile, canAnswer }: { tile: Tile; canAnswer: boolean }) {
   const [open, setOpen] = React.useState(false);
   const phasesId = React.useId();
   const asksId = React.useId();
@@ -88,8 +105,7 @@ export function ProjectTile({ tile }: { tile: Tile }) {
 
   const shown = tile.phases.slice(0, SHOWN_PHASES);
   const hidden = tile.phases.slice(SHOWN_PHASES);
-  const asks = tile.asksOpen.length + tile.asksWaiting.length;
-  const questions = questionsLine(tile.asksOpen.length, tile.asksWaiting.length);
+  const asks = tile.asksOpen.length + tile.asksAnswered.length + tile.asksWaiting.length;
   // Details reveals hidden phases in place, the full status, and the asks below the footer.
   const showAsks = asks > 0 || hidden.length === 0;
   const controls = [hidden.length > 0 && phasesId, showAsks && asksId].filter(Boolean).join(" ");
@@ -128,7 +144,11 @@ export function ProjectTile({ tile }: { tile: Tile }) {
       <StatusBlock tile={tile} clamped={!open} />
 
       <footer className="flex flex-wrap items-center gap-[8px] border-t border-border pt-[10px] text-[12px] text-[var(--text-2)]">
-        {questions && <span className="tabular-nums">{questions}</span>}
+        <QuestionsLine
+          open={tile.asksOpen.length}
+          answered={tile.asksAnswered.length}
+          waiting={tile.asksWaiting.length}
+        />
         {tile.lead && <LeadLink lead={tile.lead} />}
         <button
           type="button"
@@ -153,11 +173,15 @@ export function ProjectTile({ tile }: { tile: Tile }) {
       </footer>
 
       {showAsks && (
-        <Reveal id={asksId} open={open} className="relative z-10 -mt-[12px]">
-          <div className="mt-[12px] flex flex-col gap-[14px] border-t border-border pt-[12px]">
-            <AskList asks={tile.asksOpen} heading="Open questions" />
-            <AskList asks={tile.asksWaiting} heading="Waiting on other work" />
-            {asks === 0 && <p className="text-[12.5px] text-[var(--text-2)]">No more phases and no questions.</p>}
+        // The clip box reaches 8px past the content on the sides and 4px below, so button focus rings show.
+        <Reveal id={asksId} open={open} className="relative z-10 -mx-[8px] -mt-[12px]">
+          <div className="px-[8px] pb-[4px]">
+            <div className="mt-[12px] flex flex-col gap-[14px] border-t border-border pt-[12px]">
+              <AnsweredList asks={tile.asksAnswered} canAnswer={canAnswer} />
+              <AskList asks={tile.asksOpen} heading="Open questions" canAnswer={canAnswer} />
+              <AskList asks={tile.asksWaiting} heading="Waiting on other work" canAnswer={canAnswer} />
+              {asks === 0 && <p className="text-[12.5px] text-[var(--text-2)]">No more phases and no questions.</p>}
+            </div>
           </div>
         </Reveal>
       )}

@@ -1,8 +1,7 @@
 "use client";
-import Link from "next/link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { catColor, relTime } from "@/lib/beads-view";
-import { hasRecordedWork, type Ask, type LeadRef, type Tile } from "@/lib/overview";
+import { hasRecordedWork, type LeadRef, type Tile } from "@/lib/overview";
 import { cn } from "@/lib/utils";
 
 const enc = encodeURIComponent;
@@ -127,36 +126,5 @@ export function LeadLink({ lead }: { lead: LeadRef }) {
       </TooltipTrigger>
       <TooltipContent className="max-w-none whitespace-nowrap font-mono">{lead.id}</TooltipContent>
     </Tooltip>
-  );
-}
-
-/** Asks as plain-text links into the project, oldest first. */
-export function AskList({ asks, heading }: { asks: Ask[]; heading: string }) {
-  if (asks.length === 0) return null;
-  return (
-    <div>
-      <h4 className="mb-[4px] text-[11px] font-[650] uppercase tracking-[.04em] text-[var(--text-2)]">
-        {heading} <span className="tabular-nums">({asks.length})</span>
-      </h4>
-      <ul className="-mx-[6px] flex flex-col gap-[2px]">
-        {asks.map((a) => (
-          <li key={a.id}>
-            <Link
-              href={askHref(a.projectId, a.id)}
-              className={`flex items-baseline gap-[8px] rounded-[6px] px-[6px] py-[3px] text-[12.5px] hover:bg-[var(--surface-2)] ${FOCUS_RING}`}
-            >
-              <span className="min-w-0 flex-1 truncate" title={a.title}>
-                {a.title}
-              </span>
-              {a.createdAt && (
-                <span className="flex-shrink-0 text-[11px] tabular-nums text-[var(--text-2)]">
-                  {relTime(a.createdAt)}
-                </span>
-              )}
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }

@@ -5,6 +5,7 @@ import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Launcher } from "@/components/launcher";
+import { useCanAnswer } from "@/components/home/answer-box";
 import { NeedsNow } from "@/components/home/needs-now";
 import { ProjectTile } from "@/components/home/project-tile";
 import { ProjectsMenu } from "@/components/home/projects-menu";
@@ -61,9 +62,13 @@ function Loading() {
   );
 }
 
-/** Scotty's home: what needs Esteban, then every project's progress in plain terms. Read-only. */
+/**
+ * Scotty's home: what needs Esteban, then every project's progress in plain terms. Its one
+ * write is an answer to an ask, offered only outside viewer mode.
+ */
 export function HomeView() {
   const { data, error, isPending, isFetching, refetch } = useOverview();
+  const canAnswer = useCanAnswer();
   const failed = !data && error;
 
   if (data && data.projects.length === 0) return <Launcher />;
@@ -124,13 +129,13 @@ export function HomeView() {
               <Loading />
             ) : (
               <>
-                <NeedsNow asks={data.needsNow} />
+                <NeedsNow asks={data.needsNow} canAnswer={canAnswer} />
                 <h2 id="home-projects" className="sr-only">
                   Projects
                 </h2>
                 <section aria-labelledby="home-projects" className={GRID}>
                   {data.projects.map((t) => (
-                    <ProjectTile key={t.id} tile={t} />
+                    <ProjectTile key={t.id} tile={t} canAnswer={canAnswer} />
                   ))}
                 </section>
               </>
