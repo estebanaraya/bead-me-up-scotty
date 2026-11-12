@@ -3,7 +3,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import { useActivity } from "@/hooks/use-beads";
 import { useApp } from "@/components/app-context";
-import { needsHuman } from "@/lib/beads-view";
+import { escalationsSince } from "@/lib/escalations";
 
 /**
  * Opt-in desktop/toast notifications for Mission Control. Fires when an agent
@@ -168,20 +168,14 @@ export function useNotificationWatcher(projectId: string) {
     // `beads` is an empty fallback while the query is loading. Waiting avoids
     // treating every existing human-labelled bead as a newly raised escalation.
     if (loading || error) return;
-    const current = new Set(beads.filter(needsHuman).map((b) => b.id));
-    if (seenHumanRef.current === null) {
-      seenHumanRef.current = current;
-      return;
-    }
-    const prevSeen = seenHumanRef.current;
-    seenHumanRef.current = current;
+    // Answered asks leave the seen set silently; a re-ask is raised again (lib/escalations.ts).
+    const { seen, raised } = escalationsSince(seenHumanRef.current, beads);
+    seenHumanRef.current = seen;
 
     const prefs = loadPrefs();
     if (!prefs.enabled || !prefs.escalation) return;
-    for (const b of beads.filter(needsHuman)) {
-      if (!prevSeen.has(b.id)) {
-        fire(`🙋 Needs you: ${b.id}`, b.title, projectId, b.id);
-      }
+    for (const b of raised) {
+      fire(`🙋 Needs you: ${b.id}`, b.title, projectId, b.id);
     }
   }, [beads, error, loading, projectId]);
 }

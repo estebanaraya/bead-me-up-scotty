@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
-import { initials, avatarColor, needsHuman, readyHumanGate } from "@/lib/beads-view";
+import { initials, avatarColor, awaitingHuman, awaitingHumanGate } from "@/lib/beads-view";
 import { useGamification } from "@/hooks/use-beads";
 // GITHUB_REPO is shared with the build badge (where bug/feature issues are filed).
 import { GITHUB_REPO } from "@/lib/build-info";
@@ -64,8 +64,9 @@ export function Sidebar({
   const actor = meta?.humanActor ?? "you";
   const epicCount = beads.filter((b) => b.issue_type === "epic").length;
   // "Needs You" = agent-flagged beads (bd human) + ready human-approval gates.
+  // Answered asks stay open for the lead but no longer wait on the human.
   const needsYouCount =
-    beads.filter(needsHuman).length + beads.filter((b) => readyHumanGate(b, index)).length;
+    beads.filter(awaitingHuman).length + beads.filter((b) => awaitingHumanGate(b, index)).length;
   const game = useGamification(projectId, !!meta?.gamification);
   const { width, startResize } = useSidebarWidth();
 

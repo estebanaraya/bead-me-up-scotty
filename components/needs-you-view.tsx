@@ -7,8 +7,8 @@ import { Icon, typeIconName } from "@/components/icons";
 import { OriginBadge } from "@/components/board/bead-card";
 import { beadOrigin } from "@/lib/attribution";
 import {
-  needsHuman,
-  readyHumanGate,
+  awaitingHuman,
+  awaitingHumanGate,
   gateBlocks,
   typeColor,
   relTime,
@@ -31,9 +31,10 @@ import { isSubmitKey } from "@/lib/keyboard-shortcuts";
  */
 export function NeedsYouView() {
   const { beads, index } = useApp();
-  const inbox = React.useMemo(() => beads.filter(needsHuman), [beads]);
+  // Answered asks (label `answered`) wait on the lead, not the human, until a re-ask removes the label.
+  const inbox = React.useMemo(() => beads.filter(awaitingHuman), [beads]);
   const gates = React.useMemo(
-    () => beads.filter((b) => readyHumanGate(b, index)),
+    () => beads.filter((b) => awaitingHumanGate(b, index)),
     [beads, index],
   );
   const total = inbox.length + gates.length;

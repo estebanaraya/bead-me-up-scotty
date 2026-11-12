@@ -35,6 +35,19 @@ export function readyHumanGate(b: Bead, index: Map<string, Bead>): boolean {
   return isHumanGate(b) && b.status !== "closed" && !isBlocked(b, index);
 }
 
+/** An ask the owner has answered: it stays open until the lead acts, labelled `answered`. */
+export function isAnswered(b: Bead): boolean {
+  return (b.labels ?? []).includes("answered");
+}
+
+/** Still waiting on the owner: an answered ask leaves badges, the inbox and notifications; a re-ask (label removed) returns. */
+export function awaitingHuman(b: Bead): boolean {
+  return needsHuman(b) && !isAnswered(b);
+}
+export function awaitingHumanGate(b: Bead, index: Map<string, Bead>): boolean {
+  return readyHumanGate(b, index) && !isAnswered(b);
+}
+
 /** Beads that this gate blocks (they depend on it via a blocking dep). */
 export function gateBlocks(gateId: string, beads: Bead[]): Bead[] {
   return beads.filter((b) =>

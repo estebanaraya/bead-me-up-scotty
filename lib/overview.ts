@@ -1,6 +1,6 @@
 import type { Bead } from "./schema";
 import { latestAnswer } from "./answer";
-import { isBlocked, isHumanGate, makeIndex, needsHuman } from "./beads-view";
+import { isAnswered, isBlocked, isHumanGate, makeIndex, needsHuman } from "./beads-view";
 import {
   bulkMinutes,
   buildPhases,
@@ -88,10 +88,7 @@ function toAsk(project: ProjectRef, b: Bead): Ask {
   return { projectId: project.id, projectName: project.name, id: b.id, title: b.title, kind, createdAt: b.created_at ?? null };
 }
 
-/** An ask Esteban has answered: it stays open until the lead acts, labelled `answered`. */
-export function isAnswered(b: Bead): boolean {
-  return (b.labels ?? []).includes("answered");
-}
+export { isAnswered } from "./beads-view";
 
 /** Esteban's newest answer on an issue: the latest comment he authored, else none. */
 function toAnswered(project: ProjectRef, b: Bead, humanActor: string | undefined): AnsweredAsk {
