@@ -63,13 +63,26 @@ test("phases count non-epic work at any depth, decisions included", () => {
   );
 });
 
-test("work under a nested phase counts toward the nearest phase only", () => {
+test("work under a nested phase counts toward it and every open phase above", () => {
   const outer = bead({ id: "o", issue_type: "epic", labels: ["phase"] });
   const inner = child("i", "o", { issue_type: "epic", labels: ["phase"] });
   const beads = [outer, inner, child("w", "i"), child("x", "o")];
   const phases = buildPhases(beads, makeIndex(beads), new Set());
   const byId = Object.fromEntries(phases.map((p) => [p.id, p.total]));
-  assert.deepEqual(byId, { o: 1, i: 1 });
+  assert.deepEqual(byId, { o: 2, i: 1 });
+});
+
+test("a three-level phase chain counts the work once in each phase, nested phase updates included", () => {
+  const beads = [
+    bead({ id: "a", issue_type: "epic", labels: ["phase"], updated_at: iso(90 * HOUR) }),
+    child("b", "a", { issue_type: "epic", labels: ["phase"], updated_at: iso(80 * HOUR) }),
+    child("c", "b", { issue_type: "epic", labels: ["phase"], updated_at: iso(2 * HOUR) }),
+    child("t", "c", { status: "in_progress", updated_at: iso(5 * HOUR) }),
+  ];
+  const phases = buildPhases(beads, makeIndex(beads), new Set());
+  const byId = Object.fromEntries(phases.map((p) => [p.id, [p.total, p.inProgress, p.lastTouched]]));
+  const expected = [1, 1, iso(2 * HOUR)];
+  assert.deepEqual(byId, { a: expected, b: expected, c: expected });
 });
 
 test("closed phases are not listed and parent cycles terminate", () => {
@@ -152,7 +165,7 @@ test("a sub-epic's own update counts toward its phase's last touched", () => {
   ];
   const phases = buildPhases(beads, makeIndex(beads), new Set());
   const byId = Object.fromEntries(phases.map((p) => [p.id, [p.lastTouched, p.total]]));
-  assert.deepEqual(byId, { p: [iso(3 * HOUR), 1], i: [iso(1 * HOUR), 0] });
+  assert.deepEqual(byId, { p: [iso(1 * HOUR), 1], i: [iso(1 * HOUR), 0] });
 });
 
 test("bulk minutes count closed issues only", () => {

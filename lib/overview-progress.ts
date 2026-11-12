@@ -69,32 +69,35 @@ export function isPhase(b: Bead): boolean {
   return b.issue_type === "epic" && (b.labels ?? []).includes("phase") && b.status !== "closed";
 }
 
-type PhaseMembers = { work: Bead[]; epics: Bead[] };
+type PhaseMembers = { work: Bead[]; touched: Bead[] };
 
-/** The nearest open phase above `b`, or undefined. Parent cycles terminate. */
-function nearestPhase(b: Bead, index: Map<string, Bead>, members: Map<string, PhaseMembers>) {
+/** Every open phase above `b`, nearest first. Parent cycles terminate. */
+function openPhasesAbove(b: Bead, index: Map<string, Bead>, members: Map<string, PhaseMembers>) {
+  const found: PhaseMembers[] = [];
   const seen = new Set<string>([b.id]);
   let parent = parentOf(b, index);
   while (parent && !seen.has(parent.id)) {
     const bucket = members.get(parent.id);
-    if (bucket) return bucket;
+    if (bucket) found.push(bucket);
     seen.add(parent.id);
     parent = parentOf(parent, index);
   }
-  return undefined;
+  return found;
 }
 
 /**
- * Each open phase's descendants, nearest phase only: non-epic work (counted
- * toward completion) and sub-epics (which only feed lastTouched).
+ * Each open phase's descendants at any depth. Umbrella phases count all work
+ * beneath them, nested phases included (Esteban, 2026-11-12): non-epic work
+ * counts toward completion; every descendant, epics included, feeds lastTouched.
  */
 function phaseMembers(beads: Bead[], index: Map<string, Bead>): Map<string, PhaseMembers> {
   const members = new Map<string, PhaseMembers>();
-  for (const b of beads) if (isPhase(b)) members.set(b.id, { work: [], epics: [] });
+  for (const b of beads) if (isPhase(b)) members.set(b.id, { work: [], touched: [] });
   for (const b of beads) {
-    if (isPhase(b)) continue;
-    const bucket = nearestPhase(b, index, members);
-    if (bucket) (b.issue_type === "epic" ? bucket.epics : bucket.work).push(b);
+    for (const bucket of openPhasesAbove(b, index, members)) {
+      bucket.touched.push(b);
+      if (b.issue_type !== "epic") bucket.work.push(b);
+    }
   }
   return members;
 }
@@ -113,14 +116,14 @@ export function buildPhases(beads: Bead[], index: Map<string, Bead>, bulk: Set<s
   return beads
     .filter(isPhase)
     .map((epic) => {
-      const { work: items, epics } = members.get(epic.id) ?? { work: [], epics: [] };
+      const { work: items, touched } = members.get(epic.id) ?? { work: [], touched: [] };
       return {
         id: epic.id,
         title: epic.title,
         done: items.filter((b) => b.status === "closed").length,
         total: items.length,
         inProgress: items.filter((b) => b.status === "in_progress" || b.status === "hooked").length,
-        lastTouched: newestReal([epic, ...epics, ...items].map((b) => b.updated_at), bulk),
+        lastTouched: newestReal([epic, ...touched].map((b) => b.updated_at), bulk),
       };
     })
     .sort(comparePhases);
