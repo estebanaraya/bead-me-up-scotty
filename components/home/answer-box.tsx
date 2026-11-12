@@ -1,34 +1,54 @@
 "use client";
 import * as React from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
+import { clearDraft, draftKey, readDraft, writeDraft } from "@/lib/answer-drafts";
 import { catColor } from "@/lib/beads-view";
 import { FOCUS_RING } from "@/components/home/tile-parts";
 
 const HINT = "Saved as a comment for the lead; the question stays open until the lead acts.";
 
 /**
- * Whether the home may offer Answer at all. Viewer mode hides every write control, as the
- * issue drawer does; while the mode is still loading, nothing is offered. Read once by the
- * home and passed down, so one poll serves every list.
- */
-export function useCanAnswer(): boolean {
-  const { data } = useQuery({ queryKey: ["viewer-mode"], queryFn: api.viewerMode, refetchInterval: 5000 });
-  return data ? !data.readOnly : false;
-}
-
-/**
  * Inline answer form. The whole box is disabled while a send is in flight, so one answer
- * writes one comment. Text survives a failed send; success refreshes the home.
+ * writes one comment. The text is a draft kept per issue outside the box: it survives a
+ * failed send, Escape, the line leaving its list and a reload. Only a successful send or
+ * Cancel discards it. Success refreshes the home, then `onSent` runs.
  */
-export function AnswerBox({ projectId, issueId, onClose }: { projectId: string; issueId: string; onClose: () => void }) {
+export function AnswerBox({
+  projectId,
+  issueId,
+  ask,
+  onClose,
+  onSent,
+}: {
+  projectId: string;
+  issueId: string;
+  /** The ask being answered, for the textarea's accessible name. */
+  ask: string;
+  /** Closes the box. Escape keeps the draft; Cancel discards it first. */
+  onClose: () => void;
+  onSent: () => void;
+}) {
   const qc = useQueryClient();
-  const [text, setText] = React.useState("");
+  const key = draftKey(projectId, issueId);
+  const [text, setText] = React.useState(() => readDraft(key));
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const id = React.useId();
+  const textarea = React.useRef<HTMLTextAreaElement>(null);
   const answer = text.trim();
+
+  // A reopened draft puts the caret at its end, ready to continue.
+  React.useEffect(() => {
+    const el = textarea.current;
+    if (el) el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
+
+  // Disabling the box during the send dropped focus to the page; a failure hands it back.
+  React.useEffect(() => {
+    if (error) textarea.current?.focus();
+  }, [error]);
 
   async function send() {
     if (!answer || sending) return;
@@ -36,8 +56,9 @@ export function AnswerBox({ projectId, issueId, onClose }: { projectId: string; 
     setError(null);
     try {
       await api.answer(projectId, issueId, answer);
+      clearDraft(key);
       await qc.invalidateQueries({ queryKey: ["overview"] });
-      onClose();
+      onSent();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setSending(false);
@@ -64,15 +85,19 @@ export function AnswerBox({ projectId, issueId, onClose }: { projectId: string; 
     >
       <fieldset disabled={sending} className="contents">
         <label htmlFor={`${id}-text`} className="sr-only">
-          Your answer
+          Your answer: {ask}
         </label>
         <textarea
+          ref={textarea}
           id={`${id}-text`}
           autoFocus
           rows={3}
           value={text}
           aria-describedby={`${id}-note`}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            writeDraft(key, e.target.value);
+          }}
           className={`block w-full resize-y rounded-[10px] border border-[var(--brand)] bg-[var(--bg)] px-[12px] py-[10px] text-[13px] leading-[1.45] text-[var(--text)] caret-[var(--brand)] disabled:opacity-60 ${FOCUS_RING}`}
         />
         <div className="flex flex-wrap items-center justify-end gap-x-[8px] gap-y-[6px]">
@@ -94,7 +119,15 @@ export function AnswerBox({ projectId, issueId, onClose }: { projectId: string; 
               HINT
             )}
           </p>
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              clearDraft(key);
+              onClose();
+            }}
+          >
             Cancel
           </Button>
           <Button type="submit" size="sm" disabled={sending || !answer}>

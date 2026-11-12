@@ -5,11 +5,12 @@ import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Launcher } from "@/components/launcher";
-import { useCanAnswer } from "@/components/home/answer-box";
+import { AnswerAnnouncer } from "@/components/home/answer-scope";
 import { NeedsNow } from "@/components/home/needs-now";
 import { ProjectTile } from "@/components/home/project-tile";
 import { ProjectsMenu } from "@/components/home/projects-menu";
 import { useOverview } from "@/hooks/use-overview";
+import { useViewerMode } from "@/hooks/use-viewer-mode";
 import { fmtDateTime, relTime } from "@/lib/beads-view";
 
 const GRID = "grid grid-cols-1 items-start gap-[14px] sm:grid-cols-2 lg:grid-cols-3";
@@ -68,7 +69,9 @@ function Loading() {
  */
 export function HomeView() {
   const { data, error, isPending, isFetching, refetch } = useOverview();
-  const canAnswer = useCanAnswer();
+  // Answer shows only once viewer mode is known to be off: closed while it loads or fails.
+  const viewerMode = useViewerMode();
+  const canAnswer = viewerMode.data?.readOnly === false;
   const failed = !data && error;
 
   if (data && data.projects.length === 0) return <Launcher />;
@@ -128,7 +131,7 @@ export function HomeView() {
             {isPending || !data ? (
               <Loading />
             ) : (
-              <>
+              <AnswerAnnouncer>
                 <NeedsNow asks={data.needsNow} canAnswer={canAnswer} />
                 <h2 id="home-projects" className="sr-only">
                   Projects
@@ -138,7 +141,7 @@ export function HomeView() {
                     <ProjectTile key={t.id} tile={t} canAnswer={canAnswer} />
                   ))}
                 </section>
-              </>
+              </AnswerAnnouncer>
             )}
           </div>
         </main>
