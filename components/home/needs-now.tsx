@@ -21,7 +21,7 @@ export function NeedsNow({ asks }: { asks: TopAsk[] }) {
     >
       <h2
         id="needs-now"
-        className="text-[12px] font-[650] uppercase tracking-[.04em] text-[var(--brand)]"
+        className="text-[17px] font-[650] leading-[1.25] tracking-[-.015em] text-[var(--text)]"
       >
         Needs you now
       </h2>

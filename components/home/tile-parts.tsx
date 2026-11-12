@@ -2,7 +2,8 @@
 import Link from "next/link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { catColor, relTime } from "@/lib/beads-view";
-import type { Ask, LeadRef, Tile } from "@/lib/overview";
+import { hasRecordedWork, type Ask, type LeadRef, type Tile } from "@/lib/overview";
+import { cn } from "@/lib/utils";
 
 const enc = encodeURIComponent;
 export const boardHref = (projectId: string) => `/p/${enc(projectId)}?view=board`;
@@ -27,6 +28,12 @@ const PACE: Record<Tile["pace"], { label: string; color: string }> = {
   unknown: { label: "No activity yet", color: "var(--text-3)" },
 };
 
+/** Unknown pace on a project that has work means its whole history arrived in the bulk import. */
+function paceLabel(tile: Tile): string {
+  if (tile.pace === "unknown" && hasRecordedWork(tile)) return "No movement since import";
+  return PACE[tile.pace].label;
+}
+
 function Dot({ color, size = 7 }: { color: string; size?: number }) {
   return (
     <span
@@ -44,7 +51,7 @@ export function PaceLine({ tile }: { tile: Tile }) {
     <div className="flex flex-wrap items-center gap-x-[8px] gap-y-[2px] text-[12px] text-[var(--text-2)]">
       <span className="inline-flex items-center gap-[6px] font-medium text-[var(--text)]">
         <Dot color={pace.color} />
-        {pace.label}
+        {paceLabel(tile)}
       </span>
       {tile.lastMovedAt && <span>{relTime(tile.lastMovedAt)}</span>}
       {tile.doneThisWeek > 0 && (
@@ -57,8 +64,11 @@ export function PaceLine({ tile }: { tile: Tile }) {
   );
 }
 
-/** The lead's moved and next lines, their age, staleness, and the last real close when it helps. */
-export function StatusBlock({ tile }: { tile: Tile }) {
+/**
+ * The lead's moved and next lines, their age, staleness, and the last real close when it helps.
+ * Moved and Next clamp to three lines; Details (clamped=false) shows them in full.
+ */
+export function StatusBlock({ tile, clamped }: { tile: Tile; clamped: boolean }) {
   const { status, lastClosed } = tile;
   const hasStatus = Boolean(status.moved || status.next);
   return (
@@ -66,14 +76,14 @@ export function StatusBlock({ tile }: { tile: Tile }) {
       {hasStatus ? (
         <>
           {status.moved && (
-            <p>
-              <span className="font-[600]">Moved: </span>
+            <p className={cn(clamped && "line-clamp-3")}>
+              <span className="font-medium text-[var(--text-2)]">Moved: </span>
               {status.moved}
             </p>
           )}
           {status.next && (
-            <p>
-              <span className="font-[600]">Next: </span>
+            <p className={cn(clamped && "line-clamp-3")}>
+              <span className="font-medium text-[var(--text-2)]">Next: </span>
               {status.next}
             </p>
           )}
@@ -128,7 +138,7 @@ export function AskList({ asks, heading }: { asks: Ask[]; heading: string }) {
       <h4 className="mb-[4px] text-[11px] font-[650] uppercase tracking-[.04em] text-[var(--text-2)]">
         {heading} <span className="tabular-nums">({asks.length})</span>
       </h4>
-      <ul className="flex flex-col gap-[2px]">
+      <ul className="-mx-[6px] flex flex-col gap-[2px]">
         {asks.map((a) => (
           <li key={a.id}>
             <Link

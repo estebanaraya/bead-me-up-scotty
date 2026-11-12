@@ -51,7 +51,8 @@ export type Home = { generatedAt: string; needsNow: TopAsk[]; projects: Tile[] }
 export type ProjectRef = { id: string; name: string };
 export type Kv = Record<string, unknown>;
 
-const STATUS_MAX = 200;
+// A guard against runaway text, not an edit: the tile clamps visually and Details shows the rest (spec 5.2).
+const STATUS_MAX = 500;
 const STALE_MS = 24 * 3600_000;
 const ISO_RE = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/;
 const LEAD_ID_RE = /^local_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -140,6 +141,19 @@ export function buildTile(project: ProjectRef, beads: Bead[], kv: Kv, now: Date)
     topAsk: topAsk(project, kv, index, open),
     lead: tileLead(beads),
   };
+}
+
+/**
+ * Whether the tile shows any recorded work: phase work, asks or a real close.
+ * Separates "never had activity" from "all its history arrived in a bulk import"
+ * when the pace is unknown, so the label never contradicts the tile's own meters.
+ */
+export function hasRecordedWork(tile: Tile): boolean {
+  return (
+    tile.phases.some((p) => p.total > 0) ||
+    tile.asksOpen.length + tile.asksWaiting.length > 0 ||
+    tile.lastClosed !== null
+  );
 }
 
 /** A project with no issue data (not on Beads, or its read failed). */

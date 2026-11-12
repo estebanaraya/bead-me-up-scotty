@@ -34,10 +34,30 @@ function TileLink({ href, children }: { href: string; children: React.ReactNode 
   );
 }
 
+/** "2 questions open, 1 waiting"; a zero clause is dropped, and both zero says nothing. */
 function questionsLine(open: number, waiting: number): string | null {
-  if (open + waiting === 0) return null;
-  const head = `${open} ${open === 1 ? "question" : "questions"} open`;
-  return waiting > 0 ? `${head}, ${waiting} waiting` : head;
+  const parts = [
+    open > 0 ? `${open} ${open === 1 ? "question" : "questions"} open` : null,
+    waiting > 0 ? `${waiting} waiting` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : null;
+}
+
+/** A region that grows from zero height; the negative top margin cancels its column gap while closed. */
+function Reveal({ id, open, className, children }: { id: string; open: boolean; className: string; children: React.ReactNode }) {
+  return (
+    <div
+      id={id}
+      inert={!open}
+      className={cn(
+        "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+        className,
+        open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+      )}
+    >
+      <div className="min-h-0 overflow-hidden">{children}</div>
+    </div>
+  );
 }
 
 /**
@@ -47,13 +67,14 @@ function questionsLine(open: number, waiting: number): string | null {
  */
 export function ProjectTile({ tile }: { tile: Tile }) {
   const [open, setOpen] = React.useState(false);
-  const detailsId = React.useId();
+  const phasesId = React.useId();
+  const asksId = React.useId();
   const board = boardHref(tile.id);
 
   if (tile.state !== "ok") {
     return (
       <article className={TILE}>
-        <h3 className="text-[15px] font-[650] tracking-[-.01em] [overflow-wrap:anywhere]">
+        <h3 className="text-[17px] font-[650] leading-[1.25] tracking-[-.015em] [overflow-wrap:anywhere]">
           <TileLink href={board}>{tile.name}</TileLink>
         </h3>
         <p className="mt-[6px] text-[12.5px] text-[var(--text-2)] [overflow-wrap:anywhere]">
@@ -69,11 +90,14 @@ export function ProjectTile({ tile }: { tile: Tile }) {
   const hidden = tile.phases.slice(SHOWN_PHASES);
   const asks = tile.asksOpen.length + tile.asksWaiting.length;
   const questions = questionsLine(tile.asksOpen.length, tile.asksWaiting.length);
+  // Details reveals hidden phases in place, the full status, and the asks below the footer.
+  const showAsks = asks > 0 || hidden.length === 0;
+  const controls = [hidden.length > 0 && phasesId, showAsks && asksId].filter(Boolean).join(" ");
 
   return (
     <article className={cn(TILE, "flex flex-col gap-[12px]")}>
       <header className="flex flex-col gap-[3px]">
-        <h3 className="text-[15px] font-[650] tracking-[-.01em] [overflow-wrap:anywhere]">
+        <h3 className="text-[17px] font-[650] leading-[1.25] tracking-[-.015em] [overflow-wrap:anywhere]">
           <TileLink href={board}>{tile.name}</TileLink>
         </h3>
         <PaceLine tile={tile} />
@@ -85,6 +109,15 @@ export function ProjectTile({ tile }: { tile: Tile }) {
         ) : (
           shown.map((p) => <PhaseMeter key={p.id} phase={p} />)
         )}
+        {hidden.length > 0 && (
+          <Reveal id={phasesId} open={open} className="-mt-[10px]">
+            <div className="flex flex-col gap-[10px] pt-[10px]">
+              {hidden.map((p) => (
+                <PhaseMeter key={p.id} phase={p} />
+              ))}
+            </div>
+          </Reveal>
+        )}
         {hidden.length > 0 && !open && (
           <p className="text-[11.5px] text-[var(--text-2)]">
             +{hidden.length} more {hidden.length === 1 ? "phase" : "phases"}
@@ -92,7 +125,7 @@ export function ProjectTile({ tile }: { tile: Tile }) {
         )}
       </div>
 
-      <StatusBlock tile={tile} />
+      <StatusBlock tile={tile} clamped={!open} />
 
       <footer className="flex flex-wrap items-center gap-[8px] border-t border-border pt-[10px] text-[12px] text-[var(--text-2)]">
         {questions && <span className="tabular-nums">{questions}</span>}
@@ -100,7 +133,7 @@ export function ProjectTile({ tile }: { tile: Tile }) {
         <button
           type="button"
           aria-expanded={open}
-          aria-controls={detailsId}
+          aria-controls={controls}
           onClick={() => setOpen((v) => !v)}
           className={cn(
             "relative z-10 ml-auto inline-flex items-center gap-[4px] rounded-[7px] px-[8px] py-[3px] font-medium text-[var(--text-2)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] aria-expanded:text-[var(--text)]",
@@ -119,32 +152,15 @@ export function ProjectTile({ tile }: { tile: Tile }) {
         </button>
       </footer>
 
-      {/* Grows from zero height; the negative margin cancels the column gap while closed. */}
-      <div
-        id={detailsId}
-        inert={!open}
-        className={cn(
-          "relative z-10 -mt-[12px] grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
-          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-        )}
-      >
-        <div className="min-h-0 overflow-hidden">
+      {showAsks && (
+        <Reveal id={asksId} open={open} className="relative z-10 -mt-[12px]">
           <div className="mt-[12px] flex flex-col gap-[14px] border-t border-border pt-[12px]">
-            {hidden.length > 0 && (
-              <div className="flex flex-col gap-[10px]">
-                {hidden.map((p) => (
-                  <PhaseMeter key={p.id} phase={p} />
-                ))}
-              </div>
-            )}
             <AskList asks={tile.asksOpen} heading="Open questions" />
             <AskList asks={tile.asksWaiting} heading="Waiting on other work" />
-            {asks === 0 && hidden.length === 0 && (
-              <p className="text-[12.5px] text-[var(--text-2)]">No more phases and no questions.</p>
-            )}
+            {asks === 0 && <p className="text-[12.5px] text-[var(--text-2)]">No more phases and no questions.</p>}
           </div>
-        </div>
-      </div>
+        </Reveal>
+      )}
     </article>
   );
 }

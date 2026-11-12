@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Bead } from "./schema";
-import { buildHome, buildTile, compareTiles, emptyTile, isAsk, leadRef, readStatus, type Tile } from "./overview";
+import { buildHome, buildTile, compareTiles, emptyTile, hasRecordedWork, isAsk, leadRef, readStatus, type Tile } from "./overview";
 
 const NOW = new Date("2026-11-12T12:00:00Z");
 const HOUR = 3600_000;
@@ -58,10 +58,13 @@ test("top ask prefers the lead's pick, then the oldest P0-1 open ask", () => {
 });
 
 test("status is trimmed, capped, validated and marked stale", () => {
-  const long = "x".repeat(250);
-  const s = readStatus({ "status.moved": long, "status.next": "  Next  ", "status.at": iso(48 * HOUR) }, iso(1 * HOUR));
-  assert.equal(s.moved?.length, 203);
-  assert.ok(s.moved?.endsWith("..."));
+  // A lead's sentence is never cut: 500 characters is only a guard against runaway text.
+  const sentence = "x".repeat(480);
+  const s = readStatus({ "status.moved": sentence, "status.next": "  Next  ", "status.at": iso(48 * HOUR) }, iso(1 * HOUR));
+  assert.equal(s.moved, sentence);
+  const runaway = readStatus({ "status.moved": "y".repeat(900) }, null).moved;
+  assert.equal(runaway?.length, 503);
+  assert.ok(runaway?.endsWith("..."));
   assert.equal(s.next, "Next");
   assert.equal(s.at, iso(48 * HOUR));
   assert.equal(s.stale, true);
@@ -107,4 +110,20 @@ test("tiles keep a stable order and the strip is oldest first", () => {
   const home = buildHome(tiles, NOW);
   assert.deepEqual(home.needsNow.map((a) => a.id), ["Jaque", "Zoneboid"]);
   assert.equal(home.generatedAt, NOW.toISOString());
+});
+
+test("an unknown pace still knows whether the project has recorded work", () => {
+  // The 2026-11-11 import: every close in one minute, so no movement, but a phase meter with real numbers.
+  const imported = [
+    bead({ id: "ph", issue_type: "epic", labels: ["phase"], updated_at: "2026-11-11T19:29:10Z" }),
+    ...Array.from({ length: 10 }, (_, i) =>
+      bead({ id: `t${i}`, status: "closed", dependencies: [{ issue_id: `t${i}`, depends_on_id: "ph", type: "parent-child" }], closed_at: "2026-11-11T19:29:30Z", updated_at: "2026-11-11T19:29:30Z" } as Partial<Bead> & { id: string }),
+    ),
+  ];
+  const t = buildTile(P, imported, {}, NOW);
+  assert.equal(t.pace, "unknown");
+  assert.equal(hasRecordedWork(t), true);
+  const asked = buildTile(P, [bead({ id: "d", issue_type: "decision" })], {}, NOW);
+  assert.deepEqual([asked.pace, hasRecordedWork(asked)], ["unknown", true]);
+  assert.equal(hasRecordedWork(buildTile(P, [], {}, NOW)), false);
 });

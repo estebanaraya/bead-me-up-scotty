@@ -28,15 +28,33 @@ function UpdatedAgo({ at }: { at: string }) {
   return <span title={fmtDateTime(at)}>updated {text}</span>;
 }
 
-/** The strip and the grid in their loaded shape, so nothing jumps when data lands. */
+const SHELL = "rounded-[14px] border border-border bg-[var(--surface)] shadow-[var(--shadow)]";
+
+/**
+ * The strip and the tiles as empty shells at their typical loaded heights (five asks; a
+ * tile with two phases, a status and a footer: 360px), so nothing jumps when data lands.
+ */
 function Loading() {
   return (
     <div className="flex flex-col gap-[18px]" aria-busy="true">
       <span className="sr-only">Loading projects</span>
-      <Skeleton className="h-[92px] w-full rounded-[14px]" />
+      <div className={`${SHELL} flex h-[425px] flex-col gap-[14px] p-[14px_16px] sm:h-[269px] lg:h-[212px]`}>
+        <Skeleton className="h-[18px] w-[150px]" />
+        {[0, 1, 2, 3, 4].map((i) => (
+          <Skeleton key={i} className="h-[16px] w-full max-w-[720px]" />
+        ))}
+      </div>
       <div className={GRID}>
         {[0, 1, 2, 3, 4, 5].map((i) => (
-          <Skeleton key={i} className="h-[230px] w-full rounded-[14px]" />
+          <div key={i} className={`${SHELL} flex h-[360px] flex-col gap-[12px] p-[16px]`}>
+            <Skeleton className="h-[20px] w-[45%]" />
+            <Skeleton className="h-[12px] w-[60%]" />
+            <Skeleton className="mt-[8px] h-[30px] w-full" />
+            <Skeleton className="h-[30px] w-full" />
+            <Skeleton className="mt-[8px] h-[54px] w-full" />
+            <Skeleton className="h-[54px] w-full" />
+            <Skeleton className="mt-auto h-[16px] w-[50%]" />
+          </div>
         ))}
       </div>
     </div>
