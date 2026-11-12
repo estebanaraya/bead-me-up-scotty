@@ -29,7 +29,7 @@ export const THEMES: ThemeDef[] = [
   { id: "rose-pine", name: "Rosé Pine", mode: "dark", swatch: ["#191724", "#26233a", "#c4a7e7"] },
 ];
 
-export const DEFAULT_THEME_ID = "light";
+export const DEFAULT_THEME_ID = "dark";
 
 const BY_ID = new Map(THEMES.map((t) => [t.id, t]));
 

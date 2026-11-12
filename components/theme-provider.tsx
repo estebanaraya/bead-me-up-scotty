@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { usePathname } from "next/navigation";
-import { getTheme, type ThemeDef, type ThemeMode } from "@/lib/themes";
+import { DEFAULT_THEME_ID, getTheme, type ThemeDef, type ThemeMode } from "@/lib/themes";
 
 /**
  * Per-project theme (bead-me-up-scotty-81k). The chosen theme is stored per-device
@@ -22,7 +22,7 @@ function subscribe(callback: () => void) {
 }
 
 function serverSnapshot(): string {
-  return "light";
+  return DEFAULT_THEME_ID;
 }
 
 function storageKey(projectId: string | null): string {
@@ -63,7 +63,7 @@ function readThemeId(projectId: string | null): string {
       : null;
     return getTheme(stored).id;
   } catch {
-    return "light";
+    return DEFAULT_THEME_ID;
   }
 }
 
@@ -78,8 +78,8 @@ interface ThemeContextValue {
 // scope-hoisting from tripping a TDZ during SSR). Only used if a consumer renders
 // with no provider mounted, which doesn't happen in practice.
 const ThemeContext = React.createContext<ThemeContextValue>({
-  theme: { id: "light", name: "Light", mode: "light", swatch: ["#f6f6f8", "#ffffff", "#6d5ef0"] },
-  mode: "light",
+  theme: { id: "dark", name: "Dark", mode: "dark", swatch: ["#0c0c0f", "#1d1d22", "#8b7cf8"] },
+  mode: "dark",
   setTheme: () => {},
   toggle: () => {},
 });
@@ -88,7 +88,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const projectId = projectIdFromPath(pathname);
 
-  // Hydration must match the server's light snapshot before reading browser
+  // Hydration must match the server's default (dark) snapshot before reading browser
   // preferences. React then applies the saved project theme and subscribes to changes.
   const themeId = React.useSyncExternalStore(
     subscribe,
