@@ -1,7 +1,7 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api-client";
-import type { Overview } from "@/lib/overview";
+import type { Home } from "@/lib/overview";
 
 const MIN_REFETCH_MS = 15000;
 const DEFAULT_POLL_MS = 30000;
@@ -29,7 +29,7 @@ export function useOverview() {
   const pollMs = config.data?.pollIntervalMs ?? DEFAULT_POLL_MS;
   return useQuery({
     queryKey: ["overview"],
-    queryFn: () => getJson<Overview>("/api/overview"),
+    queryFn: () => getJson<Home>("/api/overview"),
     refetchInterval: Math.max(pollMs, MIN_REFETCH_MS),
   });
 }
