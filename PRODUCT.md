@@ -59,8 +59,9 @@ leads into the per-project views.
   dashboard's sake.
 - Counts inflated by bulk imports (the 2026-11-11 migration closed hundreds of issues at once) must
   not read as real progress.
-- Undecided: where plain-language summaries come from (derived from data, written by the lead, or
-  generated).
+- Decided (Esteban, 2026-11-12): each project's lead writes the plain-language summaries as `bd kv`
+  keys `status.moved`, `status.next`, `status.ask_id`, `status.ask` and `status.at` (kit:lead and
+  kit:handoff), and Scotty's home reads them.
 
 ## Evidence on Hand
 
