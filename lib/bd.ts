@@ -4,6 +4,7 @@ import path from "node:path";
 import { beadSchema, type Bead, type CreateInput, type UpdateInput, type DepType } from "./schema";
 import type { BeadsStore, DoctorInfo } from "./store";
 import { BD_BIN, BD_READ_TIMEOUT_MS, BdError, pExecFile, runBdJson, runBdRaw, serializeWrite } from "./bd-exec";
+import { assertIssueId } from "./bd-id";
 
 export { BdError };
 
@@ -66,7 +67,21 @@ export function createBdStore(repoPath: string): BeadsStore {
   // Collapse concurrent list() callers (the polling views) onto one in-flight export.
   let inflightList: Promise<Bead[]> | null = null;
 
+  /**
+   * Checks every issue id (undefined entries are absent optionals) and only then
+   * queues `fn`, so a flag-shaped id never reaches a bd argument list or the queue.
+   */
+  function withIds<T>(ids: Array<string | undefined>, fn: () => Promise<T>): Promise<T> {
+    try {
+      for (const id of ids) if (id !== undefined) assertIssueId(id);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return serializeWrite(repoPath, fn);
+  }
+
   async function show(id: string): Promise<Bead> {
+    assertIssueId(id);
     // bd 1.0.5 `show <id> --json` returns its envelope `data` as an ARRAY even
     // for a single id, while beadSchema expects one object. Unwrap before parse.
     const data = await runBdJson(["show", id], ro);
@@ -101,7 +116,7 @@ export function createBdStore(repoPath: string): BeadsStore {
 
     async get(id) {
       // Serialized too — `bd show` rewrites the store like any other invocation.
-      return serializeWrite(repoPath, async () => {
+      return withIds([id], async () => {
         try {
           return await show(id);
         } catch (e) {
@@ -112,7 +127,7 @@ export function createBdStore(repoPath: string): BeadsStore {
     },
 
     create(input: CreateInput, actor: string) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([input.parent || undefined], async () => {
         const args = [
           "create",
           input.title,
@@ -135,7 +150,7 @@ export function createBdStore(repoPath: string): BeadsStore {
     },
 
     update(id, patch: UpdateInput, actor: string) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([id, patch.parent || undefined], async () => {
         const args = ["update", id];
         if (patch.title !== undefined) args.push("--title", patch.title);
         if (patch.description !== undefined) args.push("--description", patch.description);
@@ -166,7 +181,7 @@ export function createBdStore(repoPath: string): BeadsStore {
     },
 
     setStatus(id, status, actor, reason) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([id], async () => {
         if (status === "closed") {
           const args = ["close", id];
           // Only `bd close --reason` persists a close reason, and re-closing an
@@ -183,13 +198,13 @@ export function createBdStore(repoPath: string): BeadsStore {
     },
 
     remove(id, actor) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([id], async () => {
         await runBdRaw(["delete", id, "--force"], rw(actor));
       });
     },
 
     addComment(id, text, actor) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([id], async () => {
         // `--` ends flag parsing, so comment text starting with "-" stays text, not a flag.
         await runBdRaw(["comment", id, "--", text], rw(actor));
         return show(id);
@@ -197,21 +212,21 @@ export function createBdStore(repoPath: string): BeadsStore {
     },
 
     addDep(id, dependsOnId, type: DepType, actor) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([id, dependsOnId], async () => {
         await runBdRaw(["dep", "add", id, dependsOnId, "-t", type], rw(actor));
         return show(id);
       });
     },
 
     removeDep(id, dependsOnId, actor) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([id, dependsOnId], async () => {
         await runBdRaw(["dep", "remove", id, dependsOnId], rw(actor));
         return show(id);
       });
     },
 
     createGate(blocks, reason, actor) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([blocks], async () => {
         const args = ["gate", "create", "--type", "human", "--blocks", blocks];
         if (reason) args.push("--reason", reason);
         // `bd gate create --json` returns the created gate object (incl. its id).
@@ -221,21 +236,21 @@ export function createBdStore(repoPath: string): BeadsStore {
     },
 
     removeLabel(id, label, actor) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([id], async () => {
         await runBdRaw(["update", id, "--remove-label", label], rw(actor));
         return show(id);
       });
     },
 
     addLabel(id, label, actor) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([id], async () => {
         await runBdRaw(["update", id, "--add-label", label], rw(actor));
         return show(id);
       });
     },
 
     archive(id, actor) {
-      return serializeWrite(repoPath, async () => {
+      return withIds([id], async () => {
         await runBdRaw(["close", id], rw(actor));
         await runBdRaw(["label", "add", id, "archived"], rw(actor));
         return show(id);
