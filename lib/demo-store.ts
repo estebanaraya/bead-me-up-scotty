@@ -141,6 +141,12 @@ export const demoStore: BeadsStore = {
     b.updated_at = nowIso();
     return { ...b };
   },
+  async addLabel(id, label) {
+    const b = find(id);
+    if (!(b.labels ?? []).includes(label)) b.labels = [...(b.labels ?? []), label];
+    b.updated_at = nowIso();
+    return { ...b };
+  },
   async archive(id) {
     const b = find(id);
     b.status = "closed";

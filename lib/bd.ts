@@ -274,7 +274,8 @@ export function createBdStore(repoPath: string): BeadsStore {
 
     addComment(id, text, actor) {
       return serializeWrite(repoPath, async () => {
-        await runBdRaw(["comment", id, text], rw(actor));
+        // `--` ends flag parsing, so comment text starting with "-" stays text, not a flag.
+        await runBdRaw(["comment", id, "--", text], rw(actor));
         return show(id);
       });
     },
@@ -306,6 +307,13 @@ export function createBdStore(repoPath: string): BeadsStore {
     removeLabel(id, label, actor) {
       return serializeWrite(repoPath, async () => {
         await runBdRaw(["update", id, "--remove-label", label], rw(actor));
+        return show(id);
+      });
+    },
+
+    addLabel(id, label, actor) {
+      return serializeWrite(repoPath, async () => {
+        await runBdRaw(["update", id, "--add-label", label], rw(actor));
         return show(id);
       });
     },

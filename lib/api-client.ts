@@ -180,6 +180,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text }),
     }),
+  answer: (projectId: string, id: string, text: string) =>
+    request<Bead>(`${base(projectId)}/beads/${enc(id)}/answer`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
   addDep: (projectId: string, id: string, depends_on_id: string, type: DepType) =>
     request<Bead>(`${base(projectId)}/beads/${enc(id)}/deps`, {
       method: "POST",

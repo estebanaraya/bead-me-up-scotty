@@ -1,4 +1,5 @@
 import type { Bead } from "./schema";
+import { latestAnswer } from "./answer";
 import { isBlocked, isHumanGate, makeIndex, needsHuman } from "./beads-view";
 import {
   bulkMinutes,
@@ -94,13 +95,7 @@ export function isAnswered(b: Bead): boolean {
 
 /** Esteban's newest answer on an issue: the latest comment he authored, else none. */
 function toAnswered(project: ProjectRef, b: Bead, humanActor: string | undefined): AnsweredAsk {
-  const mine = humanActor
-    ? (b.comments ?? []).filter((c) => c.author === humanActor && (c.text ?? "").trim() !== "")
-    : [];
-  const latest = mine.reduce<(typeof mine)[number] | null>(
-    (best, c) => (best === null || (ms(c.created_at) ?? 0) >= (ms(best.created_at) ?? 0) ? c : best),
-    null,
-  );
+  const latest = latestAnswer(b.comments, humanActor);
   return {
     ...toAsk(project, b),
     answeredAt: latest?.created_at ?? b.updated_at ?? null,

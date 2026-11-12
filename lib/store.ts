@@ -36,6 +36,7 @@ export interface BeadsStore {
   /** Create a human approval gate that blocks `blocks` (`bd gate create --type human`). */
   createGate(blocks: string, reason: string | undefined, actor: string): Promise<Bead>;
   removeLabel(id: string, label: string, actor: string): Promise<Bead>;
+  addLabel(id: string, label: string, actor: string): Promise<Bead>;
   archive(id: string, actor: string): Promise<Bead>;
   doctor(): Promise<DoctorInfo>;
 }
