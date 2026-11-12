@@ -1,292 +1,182 @@
 import type { Bead } from "./schema";
-import type { EventRow } from "./bd";
-import { isBlocked, makeIndex, needsHuman, readyHumanGate } from "./beads-view";
+import { isBlocked, isHumanGate, makeIndex, needsHuman } from "./beads-view";
+import {
+  bulkMinutes,
+  buildPhases,
+  doneThisWeek,
+  lastClosed,
+  lastMovedAt,
+  ms,
+  paceOf,
+  type Pace,
+  type Phase,
+} from "./overview-progress";
 
 /**
- * Pure rules for the cross-project overview (no I/O): which issues are in
- * flight, blocked or waiting on a person, who is on them, and how bd's audit
- * events read as an activity feed. The route in app/api/overview does the I/O.
+ * Pure rules for Scotty's home (no I/O): what needs Esteban, the lead's
+ * status, and one tile per project. Progress rules live in
+ * overview-progress.ts; the route in app/api/overview does the I/O.
  */
 
-export const ACTIVITY_WINDOW_MS = 24 * 3600 * 1000;
-export const ACTIVITY_LIMIT = 200;
-const SNIPPET_MAX = 140;
+export type { Pace, Phase } from "./overview-progress";
 
-export type LeadRef = {
-  id: string;
-  title: string | null;
-  link: string;
-};
-export type IssueRow = {
+export type LeadRef = { id: string; title: string | null; link: string };
+export type Ask = {
+  projectId: string;
+  projectName: string;
   id: string;
   title: string;
-  status: string;
-  priority: number;
-  agent: string | null;
-  lead: LeadRef | null;
-  updatedAt: string | null;
-  latestNote: string | null;
+  kind: "decision" | "human" | "gate";
+  createdAt: string | null;
 };
-export type ProjectOverview = {
+export type TopAsk = Ask & { text: string; source: "lead" | "priority" };
+export type Status = { moved: string | null; next: string | null; at: string | null; stale: boolean };
+export type Tile = {
   id: string;
   name: string;
   state: "ok" | "not-on-beads" | "error";
   error?: string;
-  leads: LeadRef[];
-  inFlight: IssueRow[];
-  blocked: IssueRow[];
-  needsYou: IssueRow[];
-  closed24h: number;
-  lastActivity: string | null;
-  activityState: "ok" | "unavailable";
+  pace: Pace;
+  lastMovedAt: string | null;
+  doneThisWeek: number;
+  phases: Phase[];
+  status: Status;
+  lastClosed: { id: string; title: string; closedAt: string } | null;
+  asksOpen: Ask[];
+  asksWaiting: Ask[];
+  topAsk: TopAsk | null;
+  lead: LeadRef | null;
 };
-export type ActivityItem = {
-  projectId: string;
-  projectName: string;
-  at: string;
-  issueId: string;
-  title: string | null;
-  actor: string;
-  kind: string;
-  detail: string | null;
-};
-export type Overview = {
-  generatedAt: string;
-  totals: { inFlight: number; blocked: number; needsYou: number; closed24h: number };
-  projects: ProjectOverview[];
-  activity: ActivityItem[];
-};
+export type Home = { generatedAt: string; needsNow: TopAsk[]; projects: Tile[] };
 export type ProjectRef = { id: string; name: string };
+export type Kv = Record<string, unknown>;
 
-/** Start of the activity window as `YYYY-MM-DDTHH:MM:SSZ` (the only value interpolated into SQL). */
-export function cutoffIso(now: Date): string {
-  return new Date(now.getTime() - ACTIVITY_WINDOW_MS).toISOString().replace(/\.\d{3}Z$/, "Z");
-}
+const STATUS_MAX = 200;
+const STALE_MS = 24 * 3600_000;
+const ISO_RE = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?Z$/;
+const LEAD_ID_RE = /^local_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function str(v: unknown): string | null {
-  return typeof v === "string" && v.trim() !== "" ? v : null;
+  return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
 }
 
-function clip(text: string): string | null {
-  const t = text.trim();
-  if (!t) return null;
-  return t.length > SNIPPET_MAX ? `${t.slice(0, SNIPPET_MAX).trimEnd()}...` : t;
+function clip(text: string | null): string | null {
+  if (!text) return null;
+  return text.length > STATUS_MAX ? `${text.slice(0, STATUS_MAX).trimEnd()}...` : text;
 }
 
-function firstLine(text: string): string | null {
-  return clip(text.trim().split(/\r?\n/)[0] ?? "");
-}
-
-/**
- * The newest note: the last non-empty line of a notes field, cut to 140
- * characters. `bd note` appends each entry on its own line, so the last line
- * is the latest one.
- */
-export function latestNote(notes: string | null | undefined): string | null {
-  if (!notes) return null;
-  const lines = notes.split(/\r?\n/).filter((line) => line.trim() !== "");
-  const last = lines[lines.length - 1];
-  return last ? clip(last) : null;
-}
-
-/** The lead session recorded on an issue; null unless metadata `lead` is a non-empty string. */
+/** The lead session on an issue; only app session ids become links. */
 export function leadRef(metadata: Record<string, unknown> | undefined): LeadRef | null {
   const id = str(metadata?.lead);
-  if (!id) return null;
+  if (!id || !LEAD_ID_RE.test(id)) return null;
   return { id, title: str(metadata?.lead_title), link: `claude://claude.ai/epitaxy/${id}` };
 }
 
-export function toIssueRow(b: Bead): IssueRow {
+/** Something Esteban has to answer or do: `bd human`, a human gate, or an open decision that is not a knowledge bead. */
+export function isAsk(b: Bead): boolean {
+  if (b.status === "closed" || b.status === "deferred") return false;
+  if (needsHuman(b) || isHumanGate(b)) return true;
+  return b.issue_type === "decision" && !(b.labels ?? []).includes("kb");
+}
+
+function toAsk(project: ProjectRef, b: Bead): Ask {
+  const kind = isHumanGate(b) ? "gate" : b.issue_type === "decision" ? "decision" : "human";
+  return { projectId: project.id, projectName: project.name, id: b.id, title: b.title, kind, createdAt: b.created_at ?? null };
+}
+
+const byOldest = (a: { createdAt: string | null }, b: { createdAt: string | null }) =>
+  (ms(a.createdAt) ?? Infinity) - (ms(b.createdAt) ?? Infinity);
+
+export function readStatus(kv: Kv, lastMoved: string | null): Status {
+  const rawAt = str(kv["status.at"]);
+  const at = rawAt && ISO_RE.test(rawAt) && ms(rawAt) !== null ? rawAt : null;
+  const moved = ms(lastMoved);
+  const stale = at !== null && moved !== null && moved - (ms(at) as number) > STALE_MS;
+  return { moved: clip(str(kv["status.moved"])), next: clip(str(kv["status.next"])), at, stale };
+}
+
+function topAsk(project: ProjectRef, kv: Kv, index: Map<string, Bead>, open: Bead[]): TopAsk | null {
+  const pickedId = str(kv["status.ask_id"]);
+  const picked = pickedId ? index.get(pickedId) : undefined;
+  if (picked && isAsk(picked)) {
+    const ask = toAsk(project, picked);
+    return { ...ask, text: clip(str(kv["status.ask"])) ?? ask.title, source: "lead" };
+  }
+  const urgent = open.filter((b) => b.priority <= 1).map((b) => toAsk(project, b)).sort(byOldest)[0];
+  return urgent ? { ...urgent, text: urgent.title, source: "priority" } : null;
+}
+
+function tileLead(beads: Bead[]): LeadRef | null {
+  let best: { lead: LeadRef; at: number } | null = null;
+  for (const b of beads) {
+    if (b.status !== "in_progress" && b.status !== "hooked") continue;
+    const lead = leadRef(b.metadata);
+    const at = ms(b.updated_at) ?? 0;
+    if (lead && (best === null || at > best.at)) best = { lead, at };
+  }
+  return best?.lead ?? null;
+}
+
+export function buildTile(project: ProjectRef, beads: Bead[], kv: Kv, now: Date): Tile {
+  const index = makeIndex(beads);
+  const bulk = bulkMinutes(beads);
+  const statusAt = readStatus(kv, null).at;
+  const moved = lastMovedAt(beads, bulk, statusAt);
+  const asks = beads.filter(isAsk);
+  const open = asks.filter((b) => !isBlocked(b, index));
+  const waiting = asks.filter((b) => isBlocked(b, index));
   return {
-    id: b.id,
-    title: b.title,
-    status: b.status,
-    priority: b.priority,
-    agent: str(b.metadata?.agent),
-    lead: leadRef(b.metadata),
-    updatedAt: b.updated_at ?? null,
-    latestNote: latestNote(b.notes),
+    id: project.id,
+    name: project.name,
+    state: "ok",
+    pace: paceOf(moved, now.getTime()),
+    lastMovedAt: moved,
+    doneThisWeek: doneThisWeek(beads, bulk, now.getTime()),
+    phases: buildPhases(beads, index, bulk),
+    status: readStatus(kv, moved),
+    lastClosed: lastClosed(beads, bulk),
+    asksOpen: open.map((b) => toAsk(project, b)).sort(byOldest),
+    asksWaiting: waiting.map((b) => toAsk(project, b)).sort(byOldest),
+    topAsk: topAsk(project, kv, index, open),
+    lead: tileLead(beads),
   };
 }
 
-const ms = (iso: string | null | undefined): number => {
-  const t = iso ? Date.parse(iso) : NaN;
-  return Number.isNaN(t) ? 0 : t;
-};
-
-function byUpdatedDesc(a: IssueRow, b: IssueRow): number {
-  return ms(b.updatedAt) - ms(a.updatedAt) || a.id.localeCompare(b.id);
-}
-
-export function isInFlight(b: Bead): boolean {
-  return b.status === "in_progress" || b.status === "hooked";
-}
-
-/** Waiting on a person: `bd human`, a ready human gate, or an open decision that is not a knowledge bead. */
-export function needsYou(b: Bead, index: Map<string, Bead>): boolean {
-  if (needsHuman(b) || readyHumanGate(b, index)) return true;
-  return (
-    b.issue_type === "decision" &&
-    b.status !== "closed" &&
-    b.status !== "deferred" &&
-    !(b.labels ?? []).includes("kb")
-  );
-}
-
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-}
-
-function asRecord(v: unknown): Record<string, unknown> | null {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-}
-
-/** Feed wording for one audit row. Unknown event types pass through as their raw name. */
-export function eventKind(e: EventRow): { kind: string; detail: string | null } {
-  const raw = e.new_value ?? "";
-  switch (e.event_type) {
-    case "created":
-    case "claimed":
-    case "reopened":
-    case "commented":
-      return { kind: e.event_type, detail: null };
-    case "closed":
-      return { kind: "closed", detail: firstLine(raw) };
-    case "label_added":
-    case "label_removed": {
-      // bd records the label in `comment` ("Added label: x"), not in new_value.
-      const label = (e.comment ?? "").replace(/^(Added|Removed) label:\s*/i, "") || raw;
-      return { kind: e.event_type === "label_added" ? "label +" : "label -", detail: clip(label) };
-    }
-    case "updated": {
-      const value = asRecord(parseJson(raw));
-      // Not JSON: treat the value as plain text.
-      if (!value) return { kind: "updated", detail: firstLine(raw) };
-      if ("notes" in value) {
-        return { kind: "noted", detail: typeof value.notes === "string" ? latestNote(value.notes) : null };
-      }
-      const meta =
-        typeof value.metadata === "string" ? asRecord(parseJson(value.metadata)) : asRecord(value.metadata);
-      const agent = str(meta?.agent);
-      return agent ? { kind: "dispatched", detail: agent } : { kind: "updated", detail: null };
-    }
-    default:
-      return { kind: e.event_type, detail: null };
-  }
-}
-
-export function toActivity(project: ProjectRef, events: EventRow[]): ActivityItem[] {
-  return events.map((e) => ({
-    projectId: project.id,
-    projectName: project.name,
-    at: e.created_at,
-    issueId: e.issue_id,
-    title: e.title ?? null,
-    actor: e.actor,
-    ...eventKind(e),
-  }));
-}
-
-/** A project that produced no issue data (not on Beads, or its read failed). */
-export function emptyProject(
-  project: ProjectRef,
-  state: "not-on-beads" | "error",
-  error?: string,
-): ProjectOverview {
+/** A project with no issue data (not on Beads, or its read failed). */
+export function emptyTile(project: ProjectRef, state: "not-on-beads" | "error", error?: string): Tile {
   return {
     id: project.id,
     name: project.name,
     state,
     ...(error ? { error } : {}),
-    leads: [],
-    inFlight: [],
-    blocked: [],
-    needsYou: [],
-    closed24h: 0,
-    lastActivity: null,
-    activityState: state === "error" ? "unavailable" : "ok",
+    pace: "unknown",
+    lastMovedAt: null,
+    doneThisWeek: 0,
+    phases: [],
+    status: { moved: null, next: null, at: null, stale: false },
+    lastClosed: null,
+    asksOpen: [],
+    asksWaiting: [],
+    topAsk: null,
+    lead: null,
   };
 }
 
-/** One project's overview from its beads; `events` is null when the audit query failed. */
-export function buildProject(
-  project: ProjectRef,
-  beads: Bead[],
-  events: EventRow[] | null,
-  cutoff: string,
-): ProjectOverview {
-  const index = makeIndex(beads);
-  const inFlightBeads = beads.filter(isInFlight);
-  const rows = (list: Bead[]) => list.map(toIssueRow).sort(byUpdatedDesc);
+const active = (t: Tile) => t.pace === "moving" || t.pace === "slow";
 
-  const leads = new Map<string, LeadRef>();
-  for (const b of inFlightBeads) {
-    const lead = leadRef(b.metadata);
-    // Prefer the entry that carries a title when one lead appears on several issues.
-    if (lead && (!leads.has(lead.id) || (lead.title && !leads.get(lead.id)?.title))) {
-      leads.set(lead.id, lead);
-    }
-  }
-
-  const cutoffMs = Date.parse(cutoff);
-  const newest = (events ?? []).reduce<string | null>(
-    (best, e) => (best === null || ms(e.created_at) > ms(best) ? e.created_at : best),
-    null,
-  );
-
-  return {
-    id: project.id,
-    name: project.name,
-    state: "ok",
-    leads: [...leads.values()],
-    inFlight: rows(inFlightBeads),
-    blocked: rows(beads.filter((b) => !isInFlight(b) && isBlocked(b, index))),
-    needsYou: rows(beads.filter((b) => needsYou(b, index))),
-    closed24h: beads.filter((b) => b.closed_at && Date.parse(b.closed_at) >= cutoffMs).length,
-    lastActivity: newest,
-    activityState: events === null ? "unavailable" : "ok",
-  };
-}
-
-function hasWork(p: ProjectOverview): boolean {
-  return p.inFlight.length > 0 || p.blocked.length > 0 || p.needsYou.length > 0;
-}
-
-/**
- * Stable order, so cards do not move while agents write: projects with
- * in-flight, blocked or needs-you work first, then idle ones, each group by
- * name, case-insensitive.
- */
-export function compareProjects(a: ProjectOverview, b: ProjectOverview): number {
+/** Stable order (Esteban, 2026-11-11): active projects first, then the rest, by name. Asks never reorder. */
+export function compareTiles(a: Tile, b: Tile): number {
   return (
-    Number(hasWork(b)) - Number(hasWork(a)) ||
+    Number(active(b)) - Number(active(a)) ||
     a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) ||
     a.id.localeCompare(b.id)
   );
 }
 
-export function buildOverview(
-  parts: { project: ProjectOverview; activity: ActivityItem[] }[],
-  now: Date,
-): Overview {
-  const projects = parts.map((p) => p.project).sort(compareProjects);
-  const sum = (pick: (p: ProjectOverview) => number) => projects.reduce((n, p) => n + pick(p), 0);
+export function buildHome(tiles: Tile[], now: Date): Home {
   return {
     generatedAt: now.toISOString(),
-    totals: {
-      inFlight: sum((p) => p.inFlight.length),
-      blocked: sum((p) => p.blocked.length),
-      needsYou: sum((p) => p.needsYou.length),
-      closed24h: sum((p) => p.closed24h),
-    },
-    projects,
-    activity: parts
-      .flatMap((p) => p.activity)
-      .sort((a, b) => ms(b.at) - ms(a.at))
-      .slice(0, ACTIVITY_LIMIT),
+    needsNow: tiles.flatMap((t) => (t.topAsk ? [t.topAsk] : [])).sort(byOldest),
+    projects: [...tiles].sort(compareTiles),
   };
 }
