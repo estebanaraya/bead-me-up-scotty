@@ -2,7 +2,7 @@ import { getStore } from "@/lib/store";
 import { getConfig } from "@/lib/config";
 import { ok, fail } from "@/lib/api";
 import { BdError } from "@/lib/bd";
-import { answerAlreadySaved } from "@/lib/answer";
+import { answerAlreadySaved, labelFailure } from "@/lib/answer";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -14,8 +14,9 @@ const bodySchema = z.object({ text: z.string().trim().min(1).max(4000) });
 /**
  * Answer an ask from the home: post Esteban's answer as a comment, then label
  * the issue `answered`. Status is unchanged; the project's lead acts on the
- * answer and closes the issue (kit:lead step 1). Resending is safe: when his
- * newest comment already has this text, only the label is written.
+ * answer and closes the issue (kit:lead step 1). Resending is safe: when the
+ * newest comment on the issue is already his answer with this text, only the
+ * label is written. A label failure keeps bd's error code (labelFailure).
  * Viewer mode is enforced by proxy.ts, like every other write under /api/p/.
  */
 export async function POST(req: Request, { params }: Ctx) {
@@ -33,8 +34,7 @@ export async function POST(req: Request, { params }: Ctx) {
     try {
       return ok(await store.addLabel(id, "answered", cfg.humanActor));
     } catch (e) {
-      const detail = e instanceof Error ? e.message : String(e);
-      return fail(new Error(`Your answer was saved; marking it answered failed. Send again to finish. (${detail})`));
+      return fail(labelFailure(e));
     }
   } catch (e) {
     return fail(e);

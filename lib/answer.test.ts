@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Comment } from "./schema";
-import { answerAlreadySaved, latestAnswer } from "./answer";
+import { answerAlreadySaved, labelFailure, latestAnswer } from "./answer";
 
 const ME = "estebanaraya";
 const c = (author: string, text: string, created_at: string): Comment => ({ author, text, created_at });
@@ -33,4 +33,37 @@ test("resend: posts when the text differs, his older answer matches, or another 
   assert.equal(answerAlreadySaved([c(ME, "Hold", "2026-11-12T10:00:00Z")], ME, "Ship it"), false);
   assert.equal(answerAlreadySaved([c("agent", "Ship it", "2026-11-12T10:00:00Z")], ME, "Ship it"), false);
   assert.equal(answerAlreadySaved([], ME, "Ship it"), false);
+});
+
+test("resend: skips when his identical answer is the newest comment overall", () => {
+  const comments = [
+    c("lead", "Which option, A or B?", "2026-11-12T09:00:00Z"),
+    c(ME, "A", "2026-11-12T10:00:00Z"),
+  ];
+  assert.equal(answerAlreadySaved(comments, ME, "A"), true);
+});
+
+test("resend: posts when a newer comment from anyone follows his identical answer (re-ask)", () => {
+  const comments = [
+    c(ME, "A", "2026-11-12T10:00:00Z"),
+    c("lead", "Re-asking: still A after the change?", "2026-11-12T11:00:00Z"),
+  ];
+  assert.equal(answerAlreadySaved(comments, ME, "A"), false);
+});
+
+test("label failure: keeps the original error and its code, prefixes the saved note", () => {
+  class CodedError extends Error {
+    code = "schema_migration_required";
+  }
+  const original = new CodedError("bd says migrate");
+  const out = labelFailure(original);
+  assert.equal(out, original);
+  assert.equal((out as CodedError).code, "schema_migration_required");
+  assert.equal(out.message, "Your answer was saved; marking it answered failed. Send again to finish. (bd says migrate)");
+});
+
+test("label failure: wraps a non-Error throw", () => {
+  const out = labelFailure("boom");
+  assert.ok(out instanceof Error);
+  assert.equal(out.message, "Your answer was saved; marking it answered failed. Send again to finish. (boom)");
 });
