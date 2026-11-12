@@ -1,9 +1,6 @@
-import type { Metadata } from "next";
-import { OverviewView } from "@/components/overview-view";
-import { projectTitle } from "@/lib/app-title";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = { title: projectTitle("Overview") };
-
-export default function OverviewPage() {
-  return <OverviewView />;
+/** The overview is now Scotty's home; keep old links working. */
+export default function OverviewRedirect() {
+  redirect("/");
 }

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useBeads } from "@/hooks/use-beads";
 import { useBeadsStream } from "@/hooks/use-beads-stream";
 import { useLastView } from "@/hooks/use-last-view";
+import { useUrlState } from "@/hooks/use-url-state";
 import { useTheme } from "@/components/theme-provider";
 import { makeIndex } from "@/lib/beads-view";
 import { AppProvider, type DetailAction, type View } from "@/components/app-context";
@@ -40,16 +41,17 @@ export function AppShell({ projectId }: { projectId: string }) {
   // The visible bead is the last entry.
   //
   // Seeded from `?bead=<ID>` so a bead is URL-addressable (see the sync effect
-  // below). Read during render rather than in a mount effect: the repo's React
-  // Compiler lint forbids setState-in-effect, and the seed is safe to hydrate
-  // with because the drawer's open state also depends on the bead being present
-  // in `index` — react-query has no SSR prefetch here, so server and first
-  // client render both see an empty index and render the drawer closed.
-  const [openStack, setOpenStack] = React.useState<string[]>(() => {
-    if (typeof window === "undefined") return [];
-    const seed = new URLSearchParams(window.location.search).get("bead");
-    return seed ? [seed] : [];
-  });
+  // below). The seed comes from the router's search params, not
+  // `window.location`: on a client-side navigation the shell renders before the
+  // router commits the new URL, so `window.location` still holds the previous
+  // page and the incoming `?bead=` would be missed (then stripped by the sync
+  // effect). The seed is safe to hydrate with because the drawer's open state
+  // also depends on the bead being present in `index` — react-query has no SSR
+  // prefetch here, so server and first client render both see an empty index
+  // and render the drawer closed.
+  const { searchParams } = useUrlState();
+  const urlBead = searchParams.get("bead");
+  const [openStack, setOpenStack] = React.useState<string[]>(() => (urlBead ? [urlBead] : []));
   const rawOpenId = openStack.length ? openStack[openStack.length - 1] : null;
   const [selectedBeadId, selectBead] = React.useState<string | null>(null);
   const detailNonce = React.useRef(0);
@@ -58,6 +60,20 @@ export function AppShell({ projectId }: { projectId: string }) {
     action: DetailAction;
     nonce: number;
   } | null>(null);
+  // A `?bead=` that arrives while the shell stays mounted (a link to another
+  // bead in this project) opens that bead. Adjusted during render, not in an
+  // effect (the React Compiler lint forbids setState-in-effect). Only a new,
+  // non-empty value acts: the sync effect's own replaceState calls are not
+  // reflected in the router's params, and closing is the drawer's job.
+  const [seenUrlBead, setSeenUrlBead] = React.useState(urlBead);
+  if (urlBead !== seenUrlBead) {
+    setSeenUrlBead(urlBead);
+    if (urlBead && urlBead !== rawOpenId) {
+      setOpenStack([urlBead]);
+      setDetailRequest(null);
+      selectBead(urlBead);
+    }
+  }
   const [create, setCreate] = React.useState<{
     open: boolean;
     parent: string;

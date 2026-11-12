@@ -84,7 +84,7 @@ async function mobileCheck(width) {
     await page.getByText(/open the mobile Menu to switch projects/i).waitFor();
     await menu.click();
     await project.click();
-    await page.getByRole("menuitem", { name: "All projects", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Overview", exact: true }).click();
     await page.waitForURL((url) => url.pathname === "/");
     await assertSheetClosed(page, `${width}px All projects navigation`, { expectFocus: false });
   } finally {

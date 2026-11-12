@@ -1,5 +1,7 @@
 "use client";
 import * as React from "react";
+import Link from "next/link";
+import { LayoutDashboard } from "lucide-react";
 import { Icon } from "@/components/icons";
 import { useTheme } from "@/components/theme-provider";
 import { useApp, type View } from "@/components/app-context";
@@ -89,6 +91,14 @@ export function Sidebar({
         </div>
       </div>
 
+      <Link
+        href="/"
+        onClick={() => onProjectNavigate?.()}
+        className="mb-[6px] flex w-full items-center gap-[10px] rounded-[9px] px-[10px] py-2 text-[13.5px] font-medium text-[var(--text-2)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)] focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-[var(--brand)]"
+      >
+        <LayoutDashboard size={17} className="flex-shrink-0" />
+        <span className="flex-1">Overview</span>
+      </Link>
       <ProjectSwitcher projectId={projectId} kind={kind} live={live} onNavigate={onProjectNavigate} />
 
 
