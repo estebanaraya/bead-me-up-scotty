@@ -1,77 +1,11 @@
 import "server-only";
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
-import {
-  beadSchema,
-  unwrapEnvelope,
-  type Bead,
-  type CreateInput,
-  type UpdateInput,
-  type DepType,
-} from "./schema";
+import { beadSchema, type Bead, type CreateInput, type UpdateInput, type DepType } from "./schema";
 import type { BeadsStore, DoctorInfo } from "./store";
+import { BD_BIN, BD_READ_TIMEOUT_MS, BdError, pExecFile, runBdJson, runBdRaw, serializeWrite } from "./bd-exec";
 
-const pExecFile = promisify(execFile);
-const BD_BIN = process.env.BD_BIN || "bd";
-
-export class BdError extends Error {
-  code?: string;
-  constructor(message: string, code?: string) {
-    super(message);
-    this.name = "BdError";
-    this.code = code;
-  }
-}
-
-/**
- * Run a bd command. Args are passed as an array (no shell) so titles and
- * descriptions are injection-safe. Always requests the JSON envelope.
- */
-async function runBdRaw(
-  args: string[],
-  opts: { repoPath: string; actor?: string },
-): Promise<string> {
-  try {
-    const { stdout } = await pExecFile(BD_BIN, args, {
-      cwd: opts.repoPath,
-      maxBuffer: 32 * 1024 * 1024,
-      env: {
-        ...process.env,
-        BD_JSON_ENVELOPE: "1",
-        ...(opts.actor ? { BEADS_ACTOR: opts.actor } : {}),
-      },
-    });
-    return stdout;
-  } catch (err: unknown) {
-    const e = err as { stderr?: string; message?: string };
-    // bd emits a JSON error object to stderr with a `code` when --json is active.
-    const stderr = (e.stderr || "").trim();
-    try {
-      const parsed = JSON.parse(stderr) as { error?: string; code?: string };
-      if (parsed.error) throw new BdError(parsed.error, parsed.code);
-    } catch (parseErr) {
-      if (parseErr instanceof BdError) throw parseErr;
-    }
-    // bd emits the pending-migration block as PLAIN-TEXT stderr, not the JSON
-    // envelope, so it would otherwise fall through uncoded and dump ~200 words
-    // of raw text into a toast. Tag it here so the UI keys off a stable code
-    // rather than string-matching in React. (gastownhall/beads#4259)
-    if (/pending schema migration|BD_ALLOW_REMOTE_MIGRATE|#4259/i.test(stderr)) {
-      throw new BdError(stderr, "schema_migration_required");
-    }
-    throw new BdError(stderr || e.message || "bd command failed");
-  }
-}
-
-async function runBdJson<T = unknown>(
-  args: string[],
-  opts: { repoPath: string; actor?: string },
-): Promise<T> {
-  const out = await runBdRaw([...args, "--json"], opts);
-  return unwrapEnvelope(JSON.parse(out)) as T;
-}
+export { BdError };
 
 /** Parse `bd export --json` JSONL output into validated beads. */
 function parseExport(jsonl: string): Bead[] {
@@ -90,24 +24,6 @@ function parseExport(jsonl: string): Bead[] {
     if (parsed.success && parsed.data.issue_type) beads.push(parsed.data);
   }
   return beads;
-}
-
-// ---- bd serialization (embedded Dolt is single-writer *per database*) ----
-// EVERY bd invocation — including read-only `export`/`show` — rewrites the
-// embedded-Dolt store, so reads MUST serialize with writes too. Running them
-// concurrently corrupts persists ("Unable to write SST file …") and collides on
-// compaction ("Another write batch or compaction is already active").
-// Keyed by repoPath so same-project bd calls serialize while different projects
-// run in parallel.
-const writeChains = new Map<string, Promise<unknown>>();
-function serializeWrite<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
-  const prev = writeChains.get(repoPath) ?? Promise.resolve();
-  const next = prev.then(fn, fn);
-  writeChains.set(
-    repoPath,
-    next.catch(() => {}),
-  );
-  return next;
 }
 
 const inflightKv = new Map<string, Promise<Record<string, unknown>>>();
@@ -328,7 +244,7 @@ export function createBdStore(repoPath: string): BeadsStore {
 
     async doctor(): Promise<DoctorInfo> {
       try {
-        const { stdout } = await pExecFile(BD_BIN, ["--version"], { cwd: repoPath });
+        const { stdout } = await pExecFile(BD_BIN, ["--version"], { cwd: repoPath, timeout: BD_READ_TIMEOUT_MS });
         return {
           kind: "bd",
           ok: true,
