@@ -1,13 +1,13 @@
 "use client";
 import * as React from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api-client";
+import { ApiError, api } from "@/lib/api-client";
 import { clearDraft, draftKey, readDraft, writeDraft } from "@/lib/answer-drafts";
 import { catColor } from "@/lib/beads-view";
 import { FOCUS_RING } from "@/components/home/tile-parts";
-import { useAnnounce } from "@/components/home/answer-scope";
-import { ANSWER_MAX } from "@/lib/answer";
+import { ANSWER_MAX, answerFailureNote } from "@/lib/answer";
 
 const HINT = "Saved as a comment for the lead; the question stays open until the lead acts.";
 
@@ -16,7 +16,7 @@ const HINT = "Saved as a comment for the lead; the question stays open until the
  * writes one comment. The text is a draft kept per issue outside the box: it survives a
  * failed send, Escape, the line leaving its list and a reload. Only a successful send or
  * Cancel discards it. Success refreshes the home, then `onSent` runs. A failure shows inline;
- * if the box closed during the send (its line left the list), the home announces it instead.
+ * if the box closed during the send (its line left the list), a toast titled with the ask shows it.
  * Over ANSWER_MAX characters, Send is off and the hint says by how much; nothing is cut.
  */
 export function AnswerBox({
@@ -43,7 +43,6 @@ export function AnswerBox({
   const textarea = React.useRef<HTMLTextAreaElement>(null);
   const answer = text.trim();
   const over = answer.length - ANSWER_MAX;
-  const announce = useAnnounce();
   const mounted = React.useRef(true);
   React.useEffect(() => {
     mounted.current = true;
@@ -74,7 +73,9 @@ export function AnswerBox({
       onSent();
     } catch (e) {
       if (!mounted.current) {
-        announce(`Answer not saved: ${ask}. Your text is kept; open it again to retry.`);
+        const message = e instanceof Error ? e.message : String(e);
+        const detail = e instanceof ApiError ? e.detail : undefined;
+        toast.error(`Answer: ${ask}`, { description: answerFailureNote({ message, detail }) });
         return;
       }
       setError(e instanceof Error ? e.message : String(e));

@@ -50,3 +50,17 @@ export function labelFailure(e: unknown): Error {
   }
   return new Error(`${LABEL_FAILED} (${detail})`);
 }
+
+const RETRY = "Your text is kept; open it again to retry.";
+
+/**
+ * What a failed send reports once its box has closed, in the server's words. A label
+ * failure (its message, or its detail when the code rewrote the message) means the answer
+ * was saved, so it is shown as is; anything else adds that the draft waits for a retry.
+ */
+export function answerFailureNote(err: { message: string; detail?: string }): string {
+  const saved = [err.message, err.detail].find((m) => m?.startsWith(LABEL_FAILED));
+  if (saved) return saved;
+  const message = err.message.trim();
+  return `${message}${/[.!?]$/.test(message) ? "" : "."} ${RETRY}`;
+}
