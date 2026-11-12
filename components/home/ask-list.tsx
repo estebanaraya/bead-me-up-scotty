@@ -138,7 +138,7 @@ export function AskList({ asks, heading, canAnswer }: { asks: Ask[]; heading: st
             onClose={box.close}
           >
             <Link href={askHref(a.projectId, a.id)} className={ROW_LINK}>
-              <span className="line-clamp-2 min-w-0 flex-1 [overflow-wrap:anywhere]" title={a.title}>
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]" title={a.title}>
                 {a.title}
               </span>
               {a.createdAt && (
@@ -191,7 +191,7 @@ export function AnsweredList({ asks, canAnswer }: { asks: AnsweredAsk[]; canAnsw
                 className="flex-shrink-0 translate-y-[2px]"
                 style={{ color: catColor("closed") }}
               />
-              <span className="line-clamp-2 min-w-0 flex-1 text-[var(--text-2)] [overflow-wrap:anywhere]" title={a.title}>
+              <span className="min-w-0 flex-1 text-[var(--text-2)] [overflow-wrap:anywhere]" title={a.title}>
                 {a.title}
               </span>
               <span className="flex-shrink-0 text-[11px] tabular-nums text-[var(--text-2)]">

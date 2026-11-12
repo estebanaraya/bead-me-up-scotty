@@ -19,7 +19,7 @@ const ScopeContext = React.createContext<Scope | null>(null);
  * `data-answer-button`.
  */
 
-/** The home's polite live region, announcing "Answer saved" after each send. */
+/** The home's polite live region: "Answer saved" after each send, and failures the box can no longer show. */
 export function AnswerAnnouncer({ children }: { children: React.ReactNode }) {
   const [message, setMessage] = React.useState("");
   const frame = React.useRef(0);
@@ -38,6 +38,11 @@ export function AnswerAnnouncer({ children }: { children: React.ReactNode }) {
       </p>
     </Announce.Provider>
   );
+}
+
+/** The home's polite announcer; outside an AnswerAnnouncer it does nothing. */
+export function useAnnounce(): (message: string) => void {
+  return React.useContext(Announce);
 }
 
 function focusable(el: Element | null | undefined): el is HTMLElement {

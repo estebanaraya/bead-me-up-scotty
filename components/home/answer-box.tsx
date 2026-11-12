@@ -6,6 +6,8 @@ import { api } from "@/lib/api-client";
 import { clearDraft, draftKey, readDraft, writeDraft } from "@/lib/answer-drafts";
 import { catColor } from "@/lib/beads-view";
 import { FOCUS_RING } from "@/components/home/tile-parts";
+import { useAnnounce } from "@/components/home/answer-scope";
+import { ANSWER_MAX } from "@/lib/answer";
 
 const HINT = "Saved as a comment for the lead; the question stays open until the lead acts.";
 
@@ -13,7 +15,9 @@ const HINT = "Saved as a comment for the lead; the question stays open until the
  * Inline answer form. The whole box is disabled while a send is in flight, so one answer
  * writes one comment. The text is a draft kept per issue outside the box: it survives a
  * failed send, Escape, the line leaving its list and a reload. Only a successful send or
- * Cancel discards it. Success refreshes the home, then `onSent` runs.
+ * Cancel discards it. Success refreshes the home, then `onSent` runs. A failure shows inline;
+ * if the box closed during the send (its line left the list), the home announces it instead.
+ * Over ANSWER_MAX characters, Send is off and the hint says by how much; nothing is cut.
  */
 export function AnswerBox({
   projectId,
@@ -38,6 +42,15 @@ export function AnswerBox({
   const id = React.useId();
   const textarea = React.useRef<HTMLTextAreaElement>(null);
   const answer = text.trim();
+  const over = answer.length - ANSWER_MAX;
+  const announce = useAnnounce();
+  const mounted = React.useRef(true);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // A reopened draft puts the caret at its end, ready to continue.
   React.useEffect(() => {
@@ -51,7 +64,7 @@ export function AnswerBox({
   }, [error]);
 
   async function send() {
-    if (!answer || sending) return;
+    if (!answer || over > 0 || sending) return;
     setSending(true);
     setError(null);
     try {
@@ -60,6 +73,10 @@ export function AnswerBox({
       await qc.invalidateQueries({ queryKey: ["overview"] });
       onSent();
     } catch (e) {
+      if (!mounted.current) {
+        announce(`Answer not saved: ${ask}. Your text is kept; open it again to retry.`);
+        return;
+      }
       setError(e instanceof Error ? e.message : String(e));
       setSending(false);
     }
@@ -98,7 +115,7 @@ export function AnswerBox({
             setText(e.target.value);
             writeDraft(key, e.target.value);
           }}
-          className={`block w-full resize-y rounded-[10px] border border-[var(--brand)] bg-[var(--bg)] px-[12px] py-[10px] text-[13px] leading-[1.45] text-[var(--text)] caret-[var(--brand)] disabled:opacity-60 ${FOCUS_RING}`}
+          className={`block w-full resize-y rounded-[10px] border border-[var(--border-strong)] bg-[var(--bg)] px-[12px] py-[10px] text-[13px] leading-[1.45] text-[var(--text)] caret-[var(--brand)] focus:border-[var(--brand)] disabled:opacity-60 ${FOCUS_RING}`}
         />
         <div className="flex flex-wrap items-center justify-end gap-x-[8px] gap-y-[6px]">
           <p
@@ -115,6 +132,8 @@ export function AnswerBox({
                 />
                 <span>{error}</span>
               </span>
+            ) : over > 0 ? (
+              `${over} ${over === 1 ? "character" : "characters"} over the limit`
             ) : (
               HINT
             )}
@@ -130,7 +149,7 @@ export function AnswerBox({
           >
             Cancel
           </Button>
-          <Button type="submit" size="sm" disabled={sending || !answer}>
+          <Button type="submit" size="sm" disabled={sending || !answer || over > 0}>
             {sending ? "Sending…" : "Send answer"}
           </Button>
         </div>

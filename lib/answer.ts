@@ -1,6 +1,9 @@
 import type { Comment } from "./schema";
 import { ms } from "./overview-progress";
 
+/** The longest answer the route accepts, in characters after trimming; the box shows the overage. */
+export const ANSWER_MAX = 4000;
+
 /** The newest non-empty comment on an issue by time, from anyone. */
 function newestComment(comments: Comment[] | undefined): Comment | null {
   return (comments ?? [])
