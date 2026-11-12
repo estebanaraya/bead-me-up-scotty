@@ -129,3 +129,46 @@ test("last closed is the newest non-bulk close", () => {
   assert.deepEqual(lastClosed(beads, bulk), { id: "c", title: "New", closedAt: iso(5 * HOUR) });
   assert.equal(lastClosed([], bulk), null);
 });
+
+test("non-epic work under a cycle of non-phase parents counts toward nothing", () => {
+  const beads = [
+    child("x", "y"),
+    child("y", "x"),
+    child("t", "x"),
+    bead({ id: "p", issue_type: "epic", labels: ["phase"] }),
+    child("c", "p"),
+  ];
+  const phases = buildPhases(beads, makeIndex(beads), new Set());
+  assert.deepEqual(phases.map((p) => [p.id, p.total]), [["p", 1]]);
+});
+
+test("a sub-epic's own update counts toward its phase's last touched", () => {
+  const beads = [
+    bead({ id: "p", issue_type: "epic", labels: ["phase"], updated_at: iso(90 * HOUR) }),
+    child("s", "p", { issue_type: "epic", updated_at: iso(3 * HOUR) }),
+    child("t", "s", { updated_at: iso(50 * HOUR) }),
+    child("i", "p", { issue_type: "epic", labels: ["phase"], updated_at: iso(80 * HOUR) }),
+    child("is", "i", { issue_type: "epic", updated_at: iso(1 * HOUR) }),
+  ];
+  const phases = buildPhases(beads, makeIndex(beads), new Set());
+  const byId = Object.fromEntries(phases.map((p) => [p.id, [p.lastTouched, p.total]]));
+  assert.deepEqual(byId, { p: [iso(3 * HOUR), 1], i: [iso(1 * HOUR), 0] });
+});
+
+test("bulk minutes count closed issues only", () => {
+  const beads = Array.from({ length: 10 }, (_, i) =>
+    bead({ id: `b${i}`, status: i === 0 ? "open" : "closed", closed_at: "2026-11-11T19:29:1" + i + "Z" }),
+  );
+  assert.deepEqual([...bulkMinutes(beads)], []);
+});
+
+test("last moved ignores an invalid status time", () => {
+  const beads = [bead({ id: "a", updated_at: iso(30 * HOUR) })];
+  assert.equal(lastMovedAt(beads, new Set(), "yesterday"), iso(30 * HOUR));
+  assert.equal(lastMovedAt([], new Set(), "yesterday"), null);
+});
+
+test("last moved prefers a real update newer than the status time", () => {
+  const beads = [bead({ id: "a", updated_at: iso(2 * HOUR) })];
+  assert.equal(lastMovedAt(beads, new Set(), iso(30 * HOUR)), iso(2 * HOUR));
+});
