@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { relTime } from "@/lib/beads-view";
+import { catColor, relTime } from "@/lib/beads-view";
 import type { Ask, LeadRef, Tile } from "@/lib/overview";
 
 const enc = encodeURIComponent;
@@ -9,13 +9,16 @@ export const boardHref = (projectId: string) => `/p/${enc(projectId)}?view=board
 export const askHref = (projectId: string, issueId: string) =>
   `/p/${enc(projectId)}?view=focus&bead=${enc(issueId)}`;
 
-/** The home's keyboard focus ring, drawn inside the control so clipping parents never hide it. */
+/**
+ * The home's keyboard focus ring, drawn inside the control so clipping parents never hide it.
+ * Tailwind v4's outline-none sets the outline style to none, so focus restores it with outline-solid.
+ */
 export const FOCUS_RING =
-  "outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--brand)]";
+  "outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--brand)]";
 
-/** Scotty's status hues (lib/beads-view CAT_COLORS): green for done, amber for in progress. */
-const GREEN = "#16a34a";
-const AMBER = "#d97706";
+/** Scotty's status hues, from the one source: green for done, amber for in progress. */
+const GREEN = catColor("closed");
+const AMBER = catColor("in_progress");
 
 const PACE: Record<Tile["pace"], { label: string; color: string }> = {
   moving: { label: "Moving", color: GREEN },

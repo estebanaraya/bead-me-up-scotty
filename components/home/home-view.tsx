@@ -107,7 +107,10 @@ export function HomeView() {
             ) : (
               <>
                 <NeedsNow asks={data.needsNow} />
-                <section aria-label="Projects" className={GRID}>
+                <h2 id="home-projects" className="sr-only">
+                  Projects
+                </h2>
+                <section aria-labelledby="home-projects" className={GRID}>
                   {data.projects.map((t) => (
                     <ProjectTile key={t.id} tile={t} />
                   ))}

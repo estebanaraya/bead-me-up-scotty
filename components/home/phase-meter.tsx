@@ -16,8 +16,8 @@ export function PhaseMeter({ phase }: { phase: Phase }) {
         role="progressbar"
         aria-label={phase.title}
         aria-valuemin={0}
-        aria-valuemax={phase.total}
-        aria-valuenow={phase.done}
+        aria-valuemax={phase.total > 0 ? phase.total : undefined}
+        aria-valuenow={phase.total > 0 ? phase.done : undefined}
         aria-valuetext={phase.total > 0 ? `${amount} done` : amount}
         className="mt-[6px] h-[6px] overflow-hidden rounded-full bg-[var(--surface-3)]"
       >
