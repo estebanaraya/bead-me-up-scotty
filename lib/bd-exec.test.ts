@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
+import { ChildProcess } from "node:child_process";
 import os from "node:os";
-import path from "node:path";
 import {
   BD_READ_TIMEOUT_MS,
   BD_WRITE_TIMEOUT_MS,
+  BD_BACKSTOP_GRACE_MS,
   BdError,
   bdTimeoutFor,
   runBdRaw,
@@ -77,46 +77,75 @@ test("bd exec: writes and unknown commands get the long limit", () => {
   }
 });
 
-// A fake bd that starts a detached grandchild sharing its stdout, writes the
-// grandchild's pid to a file, then hangs. Killing the fake bd at the timeout
-// leaves the grandchild holding the pipe, so execFile alone would not settle.
-function holdStdoutArgs(pidFile: string): string[] {
-  const code = `
-    const { spawn } = require("node:child_process");
-    const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
-      detached: true,
-      stdio: ["ignore", "inherit", "ignore"],
-    });
-    require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(g.pid));
-    g.unref();
-    setTimeout(() => {}, 30000);
-  `;
-  return ["-e", code];
+// Fails the test instead of hanging it when `p` never settles.
+function settlesWithin<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`did not settle within ${ms} ms`)), ms);
+  });
+  return Promise.race([p, deadline]).finally(() => clearTimeout(timer));
 }
 
-test("bd exec: a bd whose grandchild keeps stdout open still rejects once, at the backstop", async () => {
-  const pidFile = path.join(os.tmpdir(), `bd-exec-grandchild-${process.pid}.pid`);
+// Makes every child ignore the SIGTERM that execFile sends at the timeout, on any
+// platform (Windows cannot ignore a real one). Other signals pass through, and
+// each child seen is SIGKILLed afterwards so none outlives the test. `signals`
+// records what the code under test sent.
+async function withSigtermIgnored<T>(fn: (signals: Array<string | number | undefined>) => Promise<T>): Promise<T> {
+  const original = ChildProcess.prototype.kill;
+  const seen = new Set<ChildProcess>();
+  const signals: Array<string | number | undefined> = [];
+  ChildProcess.prototype.kill = function (this: ChildProcess, signal?: NodeJS.Signals | number) {
+    seen.add(this);
+    signals.push(signal);
+    // Node passes the signal as a name or, from its own timeout timer, as a number.
+    const term = signal === "SIGTERM" || signal === os.constants.signals.SIGTERM;
+    return term ? false : original.call(this, signal);
+  };
+  try {
+    return await fn(signals);
+  } finally {
+    ChildProcess.prototype.kill = original;
+    for (const child of seen) child.kill("SIGKILL");
+  }
+}
+
+const HANG_FOREVER = ["-e", "setInterval(() => {}, 1000)"];
+const BACKSTOP_AT = 300 + BD_BACKSTOP_GRACE_MS;
+
+test("bd exec: runBdRaw rejects once with bd_timeout at the backstop when the kill does not stop bd", async () => {
   let settled = 0;
   const started = Date.now();
-  try {
+  const sent = await withSigtermIgnored(async (signals) => {
     await assert.rejects(
-      runBdRaw(holdStdoutArgs(pidFile), { repoPath, bin: fakeBd, timeoutMs: 300 }).finally(() => {
-        settled += 1;
-      }),
+      settlesWithin(
+        runBdRaw(HANG_FOREVER, { repoPath, bin: fakeBd, timeoutMs: 300 }).finally(() => (settled += 1)),
+        BACKSTOP_AT + 1500,
+      ),
       (err: unknown) => err instanceof BdError && err.code === "bd_timeout",
     );
-    const elapsed = Date.now() - started;
-    assert.ok(elapsed < 2300 + 2500, `rejected at the backstop, not when the grandchild exits (${elapsed} ms)`);
-    assert.equal(settled, 1);
-  } finally {
-    try {
-      process.kill(Number(fs.readFileSync(pidFile, "utf8")));
-    } catch {
-      // Already gone.
-    }
-    fs.rmSync(pidFile, { force: true });
-  }
+    return [...signals];
+  });
+  assert.ok(Date.now() - started >= BACKSTOP_AT - 50, "rejected by the backstop, not by the ignored kill");
+  assert.equal(settled, 1);
+  assert.ok(sent.includes("SIGKILL"), `the backstop sent SIGKILL (sent: ${sent.join(", ")})`);
 });
+
+// A real bd that ignores SIGTERM. POSIX only: Windows kills with TerminateProcess,
+// which a process cannot ignore. The fake exits on its own after 15 s at most.
+const IGNORES_SIGTERM = ["-e", 'process.on("SIGTERM", () => {}); setTimeout(() => process.exit(0), 15000)'];
+
+test(
+  "bd exec: a bd that ignores SIGTERM is SIGKILLed and rejects once with bd_timeout",
+  { skip: process.platform === "win32" },
+  async () => {
+    const started = Date.now();
+    await assert.rejects(
+      settlesWithin(runBdRaw(IGNORES_SIGTERM, { repoPath, bin: fakeBd, timeoutMs: 300 }), BACKSTOP_AT + 1500),
+      (err: unknown) => err instanceof BdError && err.code === "bd_timeout",
+    );
+    assert.ok(Date.now() - started >= BACKSTOP_AT - 50);
+  },
+);
 
 test("bd exec: a fast call leaves no timer behind", async () => {
   const timers = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
@@ -125,9 +154,8 @@ test("bd exec: a fast call leaves no timer behind", async () => {
   assert.equal(timers(), before);
 });
 
-// The grandchild case above only hangs execFile on POSIX; on Windows the kill
-// closes the pipe. These drive the backstop directly with a promise that never
-// settles, so it is exercised on every platform.
+// These drive the backstop directly with a promise that never settles, so it is
+// exercised on every platform.
 test("bd exec: the backstop rejects a call that never settles, once, and fires its cleanup once", async () => {
   let fired = 0;
   const started = Date.now();
@@ -139,6 +167,13 @@ test("bd exec: the backstop rejects a call that never settles, once, and fires i
   );
   assert.ok(Date.now() - started >= 190);
   assert.equal(fired, 1);
+});
+
+test("bd exec: the backstop still rejects when its cleanup throws", async () => {
+  const pending = withBackstop(new Promise<string>(() => {}), 50, () => {
+    throw new Error("cleanup failed");
+  });
+  await assert.rejects(settlesWithin(pending, 2000), (err: unknown) => (err as { code?: string }).code === "ETIMEDOUT");
 });
 
 test("bd exec: the backstop clears its timer when the call settles first", async () => {

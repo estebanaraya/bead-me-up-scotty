@@ -52,9 +52,10 @@ function isTimeout(e: ExecError): boolean {
   return e.killed === true && e.signal === BD_KILL_SIGNAL && e.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
 }
 
-// execFile settles only once the child's output streams close. On Linux or macOS
-// a grandchild that inherited bd's pipes keeps them open past the kill, so a
-// backstop rejects this long after the timeout whatever execFile does.
+// At the timeout execFile destroys its ends of bd's pipes and sends SIGTERM, then
+// settles when bd exits. A bd that ignores SIGTERM or is stuck never exits, so
+// execFile never settles. The backstop rejects this long after the timeout
+// whatever execFile does, and SIGKILLs bd.
 export const BD_BACKSTOP_GRACE_MS = 2000;
 
 /**
@@ -65,7 +66,13 @@ export async function withBackstop<T>(pending: Promise<T>, ms: number, onFire: (
   let timer: ReturnType<typeof setTimeout> | undefined;
   const backstop = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      onFire();
+      // A throwing cleanup must neither stop the rejection nor escape this timer
+      // callback as an uncaught exception (which try/finally alone would allow).
+      try {
+        onFire();
+      } catch {
+        // Cleanup is best effort; the call still rejects below.
+      }
       reject(Object.assign(new Error(`no exit within ${ms} ms`), { code: "ETIMEDOUT" }));
     }, ms);
   });
@@ -76,13 +83,16 @@ export async function withBackstop<T>(pending: Promise<T>, ms: number, onFire: (
   }
 }
 
-/** execFile with a kill at `timeout` and the backstop just after it. */
+/** execFile with a SIGTERM at `timeout` and the backstop (SIGKILL) just after it. */
 function execBounded(bin: string, args: string[], options: { cwd: string; timeout: number; env?: NodeJS.ProcessEnv }) {
   const pending = pExecFile(bin, args, { ...options, killSignal: BD_KILL_SIGNAL, maxBuffer: 32 * 1024 * 1024 });
   return withBackstop(pending, options.timeout + BD_BACKSTOP_GRACE_MS, () => {
-    // Release our ends of the pipes so execFile settles too and nothing leaks.
-    pending.child.stdout?.destroy();
-    pending.child.stderr?.destroy();
+    // SIGKILL cannot be ignored, so bd exits and execFile settles too.
+    try {
+      pending.child.kill("SIGKILL");
+    } catch {
+      // Already gone.
+    }
   });
 }
 
@@ -113,11 +123,9 @@ export type BdRunOpts = { repoPath: string; actor?: string; bin?: string; timeou
 export async function runBdRaw(args: string[], opts: BdRunOpts): Promise<string> {
   const timeout = opts.timeoutMs ?? bdTimeoutFor(args);
   try {
-    const { stdout } = await pExecFile(opts.bin ?? BD_BIN, args, {
+    const { stdout } = await execBounded(opts.bin ?? BD_BIN, args, {
       cwd: opts.repoPath,
       timeout,
-      killSignal: BD_KILL_SIGNAL,
-      maxBuffer: 32 * 1024 * 1024,
       env: {
         ...process.env,
         BD_JSON_ENVELOPE: "1",
