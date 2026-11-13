@@ -103,14 +103,24 @@ function mutationToast<TArgs, TRes>(
 export function useCreateBead() {
   const { projectId } = useApp();
   const qc = useQueryClient();
-  return useMutation(
-    mutationToast<CreateInput, Bead>(
-      (input) => api.create(projectId, input),
-      (_a, res) => `Created ${res.id} · bd create`,
-      qc,
-      beadsKey(projectId),
-    ),
+  const base = mutationToast<CreateInput, Bead>(
+    (input) => api.create(projectId, input),
+    (_a, res) => `Created ${res.id} · bd create`,
+    qc,
+    beadsKey(projectId),
   );
+  return useMutation({
+    ...base,
+    onSuccess: (res: Bead, args: CreateInput) => {
+      // The server keeps the bead when it cannot defer it; say so instead of a plain success.
+      if (args.backlog && res.status !== "deferred") {
+        toast.warning(`Created ${res.id}, but it could not be moved to the backlog; it is open`);
+        qc.invalidateQueries({ queryKey: beadsKey(projectId) });
+        return;
+      }
+      base.onSuccess(res, args);
+    },
+  });
 }
 
 export function useUpdateBead() {

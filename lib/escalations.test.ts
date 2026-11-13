@@ -28,3 +28,10 @@ test("escalations: within one project, a new ask is raised against the previous 
   const next = projectEscalationsSince(first.state, "alpha", [ask("a-1"), ask("a-2")]);
   assert.deepEqual(next.raised.map((b) => b.id), ["a-2"]);
 });
+
+test("escalations: switching back to a project does not re-raise its waiting asks", () => {
+  const first = projectEscalationsSince(null, "alpha", [ask("a-1")]);
+  const beta = projectEscalationsSince(first.state, "beta", [ask("b-1")]);
+  const back = projectEscalationsSince(beta.state, "alpha", [ask("a-1")]);
+  assert.deepEqual(back.raised, []);
+});
