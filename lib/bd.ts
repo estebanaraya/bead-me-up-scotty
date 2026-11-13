@@ -5,6 +5,7 @@ import { beadSchema, type Bead, type CreateInput, type UpdateInput, type DepType
 import type { BeadsStore, DoctorInfo } from "./store";
 import { BD_BIN, BdError, bdVersion, runBdJson, runBdRaw, serializeWrite } from "./bd-exec";
 import { assertIssueId } from "./bd-id";
+import { deferCreated } from "./bd-defer";
 
 export { BdError };
 
@@ -152,9 +153,8 @@ export function createBdStore(repoPath: string): BeadsStore {
         if (input.parent) args.push("--parent", input.parent);
         const created = await runBdJson<{ id: string }>(args, rw(actor));
         const id = created.id;
-        if (input.backlog) {
-          await runBdRaw(["update", id, "-s", "deferred"], rw(actor));
-        }
+        // A failed deferral is warned about, never thrown: the create has landed (lib/bd-defer.ts).
+        if (input.backlog) await deferCreated(id, () => runBdRaw(["update", id, "-s", "deferred"], rw(actor)));
         return showCreated(id);
       });
     },

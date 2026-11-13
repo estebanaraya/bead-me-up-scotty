@@ -26,9 +26,9 @@ const fakes: Record<string, string> = {
     process.stdout.write(JSON.stringify({ data: [{ id, title: "t", status: "open", issue_type: "task", priority: 2 }] }));`,
 };
 
-function makeRepo(): string {
+function makeRepo(overrides: Record<string, string> = {}): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scotty-fake-bd-"));
-  for (const [name, body] of Object.entries(fakes)) fs.writeFileSync(path.join(dir, name), body);
+  for (const [name, body] of Object.entries({ ...fakes, ...overrides })) fs.writeFileSync(path.join(dir, name), body);
   return dir;
 }
 
@@ -47,7 +47,8 @@ process.stdout.write(JSON.stringify(result));
   const stdout = execFileSync(
     process.execPath,
     ["--conditions=react-server", "--no-warnings", "--import", "./scripts/ts-resolve.mjs", "--input-type=module", "-e", script],
-    { cwd: root, encoding: "utf8", env: { ...process.env, BD_BIN: process.execPath } },
+    // stderr piped, not inherited: the store logs warnings there, which would clutter test output.
+    { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, BD_BIN: process.execPath } },
   );
   return JSON.parse(stdout);
 }
@@ -90,6 +91,42 @@ test("bd store: update with parent \"\" (detach) passes validation and reaches b
     assert.equal(out.ok?.id, "cc-1", JSON.stringify(out));
     const update = calls(repo).find((c) => c[0] === "update");
     assert.deepEqual(update, ["update", "cc-1", "--parent", ""]);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// bd's JSON error shape on stderr, then a failing exit, as a real bd error does.
+const failUpdate = `${log} process.stderr.write(JSON.stringify({ error: "database is locked" })); process.exit(1);`;
+// Fails the first call only, counting calls in a file beside the log.
+const failUpdateOnce = `${log} const fs = require("node:fs");
+  const n = fs.existsSync("update.count") ? Number(fs.readFileSync("update.count", "utf8")) : 0;
+  fs.writeFileSync("update.count", String(n + 1));
+  if (n === 0) { process.stderr.write(JSON.stringify({ error: "database is locked" })); process.exit(1); }`;
+const backlogCreate = `return store.create({ title: "t", issue_type: "task", priority: 2, backlog: true }, "a");`;
+
+test("bd store: a backlog create whose deferral fails returns the created bead, so a retry cannot duplicate it", () => {
+  const repo = makeRepo({ update: failUpdate });
+  try {
+    const out = runStore(repo, backlogCreate) as { ok?: { id: string } };
+    assert.equal(out.ok?.id, ODD_ID, JSON.stringify(out));
+    assert.equal(calls(repo).filter((c) => c[0] === "create").length, 1);
+    assert.deepEqual(calls(repo).at(-1)?.slice(0, 2), ["show", ODD_ID]);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("bd store: a backlog create retries a failed deferral once", () => {
+  const repo = makeRepo({ update: failUpdateOnce });
+  try {
+    const out = runStore(repo, backlogCreate) as { ok?: { id: string } };
+    assert.equal(out.ok?.id, ODD_ID, JSON.stringify(out));
+    const updates = calls(repo).filter((c) => c[0] === "update");
+    assert.deepEqual(updates, [
+      ["update", ODD_ID, "-s", "deferred"],
+      ["update", ODD_ID, "-s", "deferred"],
+    ]);
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
