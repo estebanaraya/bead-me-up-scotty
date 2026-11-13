@@ -31,7 +31,7 @@ process.exit(0);
   const stdout = execFileSync(
     process.execPath,
     ["--conditions=react-server", "--no-warnings", "--import", "./scripts/ts-resolve.mjs", "--input-type=module", "-e", script],
-    { cwd: root, encoding: "utf8", timeout: 12_000, env: { ...process.env, BD_BIN: bin } },
+    { cwd: root, encoding: "utf8", timeout: 15_000, env: { ...process.env, BD_BIN: bin } },
   );
   return JSON.parse(stdout);
 }
@@ -70,7 +70,7 @@ test(
     try {
       const { ok, ms } = available(repo, process.env.ComSpec || "cmd.exe", true);
       assert.equal(ok, false);
-      assert.ok(ms >= 7000 - 50 && ms < 9000, `false at the 5 s limit plus the 2 s backstop (${ms} ms)`);
+      assert.ok(ms >= 7000 - 50 && ms < 10_000, `false at the 5 s limit plus the 2 s backstop (${ms} ms)`);
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }

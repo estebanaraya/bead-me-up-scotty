@@ -68,12 +68,15 @@ export async function withBackstop<T>(pending: Promise<T>, ms: number, onFire: (
     timer = setTimeout(() => {
       // A throwing cleanup must neither stop the rejection nor escape this timer
       // callback as an uncaught exception (which try/finally alone would allow).
+      let cleanupError: unknown;
       try {
         onFire();
-      } catch {
-        // Cleanup is best effort; the call still rejects below.
+      } catch (e) {
+        // Cleanup is best effort; the call still rejects below, carrying it as the cause.
+        cleanupError = e;
       }
-      reject(Object.assign(new Error(`no exit within ${ms} ms`), { code: "ETIMEDOUT" }));
+      const options = cleanupError === undefined ? undefined : { cause: cleanupError };
+      reject(Object.assign(new Error(`no exit within ${ms} ms`, options), { code: "ETIMEDOUT" }));
     }, ms);
   });
   try {
@@ -91,7 +94,7 @@ function execBounded(bin: string, args: string[], options: { cwd: string; timeou
     try {
       pending.child.kill("SIGKILL");
     } catch {
-      // Already gone.
+      // Invalid or unsupported signal on this platform; best effort.
     }
   });
 }

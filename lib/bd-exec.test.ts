@@ -138,12 +138,14 @@ test(
   "bd exec: a bd that ignores SIGTERM is SIGKILLed and rejects once with bd_timeout",
   { skip: process.platform === "win32" },
   async () => {
+    // 1500 ms, not 300: the SIGTERM must land after node has installed the ignoring handler.
+    const backstopAt = 1500 + BD_BACKSTOP_GRACE_MS;
     const started = Date.now();
     await assert.rejects(
-      settlesWithin(runBdRaw(IGNORES_SIGTERM, { repoPath, bin: fakeBd, timeoutMs: 300 }), BACKSTOP_AT + 1500),
+      settlesWithin(runBdRaw(IGNORES_SIGTERM, { repoPath, bin: fakeBd, timeoutMs: 1500 }), backstopAt + 1500),
       (err: unknown) => err instanceof BdError && err.code === "bd_timeout",
     );
-    assert.ok(Date.now() - started >= BACKSTOP_AT - 50);
+    assert.ok(Date.now() - started >= backstopAt - 50);
   },
 );
 
@@ -173,7 +175,10 @@ test("bd exec: the backstop still rejects when its cleanup throws", async () => 
   const pending = withBackstop(new Promise<string>(() => {}), 50, () => {
     throw new Error("cleanup failed");
   });
-  await assert.rejects(settlesWithin(pending, 2000), (err: unknown) => (err as { code?: string }).code === "ETIMEDOUT");
+  await assert.rejects(settlesWithin(pending, 2000), (err: unknown) => {
+    const e = err as { code?: string; cause?: { message?: string } };
+    return e.code === "ETIMEDOUT" && e.cause?.message === "cleanup failed";
+  });
 });
 
 test("bd exec: the backstop clears its timer when the call settles first", async () => {
