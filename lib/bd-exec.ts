@@ -52,6 +52,40 @@ function isTimeout(e: ExecError): boolean {
   return e.killed === true && e.signal === BD_KILL_SIGNAL && e.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
 }
 
+// execFile settles only once the child's output streams close. On Linux or macOS
+// a grandchild that inherited bd's pipes keeps them open past the kill, so a
+// backstop rejects this long after the timeout whatever execFile does.
+export const BD_BACKSTOP_GRACE_MS = 2000;
+
+/**
+ * Settles with `pending`, or rejects with an ETIMEDOUT error after `ms` and calls
+ * `onFire` once. The timer never outlives the call.
+ */
+export async function withBackstop<T>(pending: Promise<T>, ms: number, onFire: () => void): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const backstop = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      onFire();
+      reject(Object.assign(new Error(`no exit within ${ms} ms`), { code: "ETIMEDOUT" }));
+    }, ms);
+  });
+  try {
+    return await Promise.race([pending, backstop]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** execFile with a kill at `timeout` and the backstop just after it. */
+function execBounded(bin: string, args: string[], options: { cwd: string; timeout: number; env?: NodeJS.ProcessEnv }) {
+  const pending = pExecFile(bin, args, { ...options, killSignal: BD_KILL_SIGNAL, maxBuffer: 32 * 1024 * 1024 });
+  return withBackstop(pending, options.timeout + BD_BACKSTOP_GRACE_MS, () => {
+    // Release our ends of the pipes so execFile settles too and nothing leaks.
+    pending.child.stdout?.destroy();
+    pending.child.stderr?.destroy();
+  });
+}
+
 export type BdRunOpts = { repoPath: string; actor?: string; bin?: string; timeoutMs?: number };
 
 /**

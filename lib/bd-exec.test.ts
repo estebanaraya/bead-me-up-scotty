@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import {
   BD_READ_TIMEOUT_MS,
   BD_WRITE_TIMEOUT_MS,
@@ -8,6 +10,7 @@ import {
   bdTimeoutFor,
   runBdRaw,
   serializeWrite,
+  withBackstop,
 } from "./bd-exec";
 
 // A fake bd: the node binary itself, told to hang or to print and exit.
@@ -69,4 +72,78 @@ test("bd exec: writes and unknown commands get the long limit", () => {
   ]) {
     assert.equal(bdTimeoutFor(args), BD_WRITE_TIMEOUT_MS, args.join(" "));
   }
+});
+
+// A fake bd that starts a detached grandchild sharing its stdout, writes the
+// grandchild's pid to a file, then hangs. Killing the fake bd at the timeout
+// leaves the grandchild holding the pipe, so execFile alone would not settle.
+function holdStdoutArgs(pidFile: string): string[] {
+  const code = `
+    const { spawn } = require("node:child_process");
+    const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+      detached: true,
+      stdio: ["ignore", "inherit", "ignore"],
+    });
+    require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(g.pid));
+    g.unref();
+    setTimeout(() => {}, 30000);
+  `;
+  return ["-e", code];
+}
+
+test("bd exec: a bd whose grandchild keeps stdout open still rejects once, at the backstop", async () => {
+  const pidFile = path.join(os.tmpdir(), `bd-exec-grandchild-${process.pid}.pid`);
+  let settled = 0;
+  const started = Date.now();
+  try {
+    await assert.rejects(
+      runBdRaw(holdStdoutArgs(pidFile), { repoPath, bin: fakeBd, timeoutMs: 300 }).finally(() => {
+        settled += 1;
+      }),
+      (err: unknown) => err instanceof BdError && err.code === "bd_timeout",
+    );
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 2300 + 2500, `rejected at the backstop, not when the grandchild exits (${elapsed} ms)`);
+    assert.equal(settled, 1);
+  } finally {
+    try {
+      process.kill(Number(fs.readFileSync(pidFile, "utf8")));
+    } catch {
+      // Already gone.
+    }
+    fs.rmSync(pidFile, { force: true });
+  }
+});
+
+test("bd exec: a fast call leaves no timer behind", async () => {
+  const timers = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+  const before = timers();
+  assert.equal(await runBdRaw(PRINT_OK, { repoPath, bin: fakeBd, timeoutMs: 5000 }), "ok");
+  assert.equal(timers(), before);
+});
+
+// The grandchild case above only hangs execFile on POSIX; on Windows the kill
+// closes the pipe. These drive the backstop directly with a promise that never
+// settles, so it is exercised on every platform.
+test("bd exec: the backstop rejects a call that never settles, once, and fires its cleanup once", async () => {
+  let fired = 0;
+  const started = Date.now();
+  await assert.rejects(
+    withBackstop(new Promise<string>(() => {}), 200, () => {
+      fired += 1;
+    }),
+    (err: unknown) => (err as { code?: string }).code === "ETIMEDOUT",
+  );
+  assert.ok(Date.now() - started >= 190);
+  assert.equal(fired, 1);
+});
+
+test("bd exec: the backstop clears its timer when the call settles first", async () => {
+  const timers = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+  const before = timers();
+  let fired = 0;
+  assert.equal(await withBackstop(Promise.resolve("ok"), 60_000, () => (fired += 1)), "ok");
+  await assert.rejects(withBackstop(Promise.reject(new Error("boom")), 60_000, () => (fired += 1)), /boom/);
+  assert.equal(timers(), before);
+  assert.equal(fired, 0);
 });
