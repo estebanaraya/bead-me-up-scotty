@@ -86,6 +86,24 @@ function execBounded(bin: string, args: string[], options: { cwd: string; timeou
   });
 }
 
+/** The bd_timeout error for a call killed at its limit, or undefined if `err` is not a timeout. */
+export function asBdTimeout(err: unknown, args: string[], timeout: number): BdError | undefined {
+  if (!err || typeof err !== "object" || !isTimeout(err as ExecError)) return undefined;
+  const command = args.find((a) => !a.startsWith("-")) ?? args[0] ?? "";
+  return new BdError(`bd ${command} timed out after ${timeout / 1000}s and was stopped`, "bd_timeout");
+}
+
+/** `bd --version`, trimmed. A hang rejects with bd_timeout; other failures pass through. */
+export async function bdVersion(repoPath: string, bin = BD_BIN, timeout = BD_READ_TIMEOUT_MS): Promise<string> {
+  const args = ["--version"];
+  try {
+    const { stdout } = await execBounded(bin, args, { cwd: repoPath, timeout });
+    return stdout.trim();
+  } catch (err) {
+    throw asBdTimeout(err, args, timeout) ?? err;
+  }
+}
+
 export type BdRunOpts = { repoPath: string; actor?: string; bin?: string; timeoutMs?: number };
 
 /**
@@ -108,11 +126,9 @@ export async function runBdRaw(args: string[], opts: BdRunOpts): Promise<string>
     });
     return stdout;
   } catch (err: unknown) {
+    const timedOut = asBdTimeout(err, args, timeout);
+    if (timedOut) throw timedOut;
     const e = err as ExecError;
-    if (isTimeout(e)) {
-      const command = args.find((a) => !a.startsWith("-")) ?? args[0] ?? "";
-      throw new BdError(`bd ${command} timed out after ${timeout / 1000}s and was stopped`, "bd_timeout");
-    }
     // bd emits a JSON error object to stderr with a `code` when --json is active.
     const stderr = (e.stderr || "").trim();
     try {

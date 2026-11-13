@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { beadSchema, type Bead, type CreateInput, type UpdateInput, type DepType } from "./schema";
 import type { BeadsStore, DoctorInfo } from "./store";
-import { BD_BIN, BD_READ_TIMEOUT_MS, BdError, pExecFile, runBdJson, runBdRaw, serializeWrite } from "./bd-exec";
+import { BD_BIN, BdError, bdVersion, pExecFile, runBdJson, runBdRaw, serializeWrite } from "./bd-exec";
 import { assertIssueId } from "./bd-id";
 
 export { BdError };
@@ -259,11 +259,12 @@ export function createBdStore(repoPath: string): BeadsStore {
 
     async doctor(): Promise<DoctorInfo> {
       try {
-        const { stdout } = await pExecFile(BD_BIN, ["--version"], { cwd: repoPath, timeout: BD_READ_TIMEOUT_MS });
+        // A hang reports "bd --version timed out after 15s" rather than a bare "Command failed".
+        const version = await bdVersion(repoPath);
         return {
           kind: "bd",
           ok: true,
-          version: stdout.trim(),
+          version,
           repoPath,
           message: `Connected to bd at ${repoPath}`,
         };

@@ -11,6 +11,9 @@ import {
   runBdRaw,
   serializeWrite,
   withBackstop,
+  asBdTimeout,
+  bdVersion,
+  pExecFile,
 } from "./bd-exec";
 
 // A fake bd: the node binary itself, told to hang or to print and exit.
@@ -146,4 +149,18 @@ test("bd exec: the backstop clears its timer when the call settles first", async
   await assert.rejects(withBackstop(Promise.reject(new Error("boom")), 60_000, () => (fired += 1)), /boom/);
   assert.equal(timers(), before);
   assert.equal(fired, 0);
+});
+
+test("bd exec: a timed-out bd --version maps to a bd_timeout that says so", async () => {
+  const err = await pExecFile(fakeBd, HANG, { timeout: 300, killSignal: "SIGTERM" }).catch((e: unknown) => e);
+  const mapped = asBdTimeout(err, ["--version"], 15_000);
+  assert.ok(mapped instanceof BdError);
+  assert.equal(mapped.code, "bd_timeout");
+  assert.match(mapped.message, /^bd --version timed out after 15s/);
+  assert.equal(asBdTimeout(new Error("Command failed"), ["--version"], 15_000), undefined);
+});
+
+test("bd exec: bdVersion returns the trimmed version line", async () => {
+  // node answers --version like bd does: one line on stdout.
+  assert.equal(await bdVersion(repoPath, fakeBd), process.version);
 });
