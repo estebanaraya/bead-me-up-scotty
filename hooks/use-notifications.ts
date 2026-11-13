@@ -3,7 +3,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import { useActivity } from "@/hooks/use-beads";
 import { useApp } from "@/components/app-context";
-import { escalationsSince } from "@/lib/escalations";
+import { projectEscalationsSince, type EscalationState } from "@/lib/escalations";
 
 /**
  * Opt-in desktop/toast notifications for Mission Control. Fires when an agent
@@ -136,7 +136,7 @@ export function useNotificationWatcher(projectId: string) {
   const items = data?.items;
 
   const lastSeenRef = React.useRef<string | null>(null);
-  const seenHumanRef = React.useRef<Set<string> | null>(null);
+  const seenHumanRef = React.useRef<EscalationState | null>(null);
 
   // Agent-finished / blocked, from the activity feed.
   React.useEffect(() => {
@@ -169,8 +169,9 @@ export function useNotificationWatcher(projectId: string) {
     // treating every existing human-labelled bead as a newly raised escalation.
     if (loading || error) return;
     // Answered asks leave the seen set silently; a re-ask is raised again (lib/escalations.ts).
-    const { seen, raised } = escalationsSince(seenHumanRef.current, beads);
-    seenHumanRef.current = seen;
+    // Keyed by project, so a switch is a silent baseline for the new project.
+    const { state, raised } = projectEscalationsSince(seenHumanRef.current, projectId, beads);
+    seenHumanRef.current = state;
 
     const prefs = loadPrefs();
     if (!prefs.enabled || !prefs.escalation) return;
