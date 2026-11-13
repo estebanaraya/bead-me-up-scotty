@@ -80,8 +80,18 @@ export function createBdStore(repoPath: string): BeadsStore {
     return serializeWrite(repoPath, fn);
   }
 
-  async function show(id: string): Promise<Bead> {
+  /** Reads a bead by a caller-supplied id, which must pass the id rule. */
+  function show(id: string): Promise<Bead> {
     assertIssueId(id);
+    return showCreated(id);
+  }
+
+  /**
+   * Reads a bead by an id bd itself just returned from a create. Not run through
+   * the id rule: the write has landed, so rejecting here would report a failure
+   * the caller retries into a duplicate.
+   */
+  async function showCreated(id: string): Promise<Bead> {
     // bd 1.0.5 `show <id> --json` returns its envelope `data` as an ARRAY even
     // for a single id, while beadSchema expects one object. Unwrap before parse.
     const data = await runBdJson(["show", id], ro);
@@ -145,7 +155,7 @@ export function createBdStore(repoPath: string): BeadsStore {
         if (input.backlog) {
           await runBdRaw(["update", id, "-s", "deferred"], rw(actor));
         }
-        return show(id);
+        return showCreated(id);
       });
     },
 
@@ -231,7 +241,7 @@ export function createBdStore(repoPath: string): BeadsStore {
         if (reason) args.push("--reason", reason);
         // `bd gate create --json` returns the created gate object (incl. its id).
         const created = await runBdJson<{ id: string }>(args, rw(actor));
-        return show(created.id);
+        return showCreated(created.id);
       });
     },
 
