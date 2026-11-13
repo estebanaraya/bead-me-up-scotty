@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { beadSchema, type Bead, type CreateInput, type UpdateInput, type DepType } from "./schema";
 import type { BeadsStore, DoctorInfo } from "./store";
-import { BD_BIN, BdError, bdVersion, pExecFile, runBdJson, runBdRaw, serializeWrite } from "./bd-exec";
+import { BD_BIN, BdError, bdVersion, runBdJson, runBdRaw, serializeWrite } from "./bd-exec";
 import { assertIssueId } from "./bd-id";
 
 export { BdError };
@@ -52,7 +52,7 @@ export async function isBdAvailable(repoPath: string): Promise<boolean> {
   if (hit !== undefined) return hit;
   let ok = false;
   try {
-    await pExecFile(BD_BIN, ["--version"], { timeout: 5000 });
+    await bdVersion(repoPath, BD_BIN, 5000);
     ok = fs.existsSync(path.join(repoPath, ".beads"));
   } catch {
     ok = false;
